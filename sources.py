@@ -1,0 +1,185 @@
+from parser.models import SourceSpec
+
+
+def build_sources() -> list[SourceSpec]:
+    """Return curated source list and topic priorities for RAG dataset creation."""
+    return [
+        SourceSpec(
+            category="basic_theory",
+            subtopic="rag_foundations",
+            url="https://arxiv.org/abs/2405.06211",
+            source_type="arxiv",
+            priority_topics=[
+                "chunking strategies",
+                "FAISS setup",
+                "embeddings pipeline",
+                "retrieval loop",
+                "prompt design for RAG",
+            ],
+        ),
+        SourceSpec(
+            category="basic_theory",
+            subtopic="rag_foundations",
+            url="https://arxiv.org/abs/2409.14924",
+            source_type="arxiv",
+            priority_topics=[
+                "chunking strategies",
+                "FAISS setup",
+                "embeddings pipeline",
+                "retrieval loop",
+                "prompt design for RAG",
+            ],
+        ),
+        SourceSpec(
+            category="basic_theory",
+            subtopic="rag_foundations",
+            url="https://arxiv.org/abs/2404.12457",
+            source_type="arxiv",
+            priority_topics=[
+                "chunking strategies",
+                "FAISS setup",
+                "embeddings pipeline",
+                "retrieval loop",
+                "prompt design for RAG",
+            ],
+        ),
+        SourceSpec(
+            category="practical_tutorials",
+            subtopic="huggingface_cookbook",
+            url="https://huggingface.co/learn/cookbook/advanced_rag",
+            source_type="docs",
+            priority_topics=[
+                "chunking strategies",
+                "FAISS setup",
+                "embeddings pipeline",
+                "retrieval loop",
+                "prompt design for RAG",
+            ],
+        ),
+        SourceSpec(
+            category="practical_tutorials",
+            subtopic="huggingface_cookbook",
+            url="https://huggingface.co/learn/cookbook/rag_zephyr_langchain",
+            source_type="docs",
+            priority_topics=[
+                "chunking strategies",
+                "FAISS setup",
+                "embeddings pipeline",
+                "retrieval loop",
+                "prompt design for RAG",
+            ],
+        ),
+        SourceSpec(
+            category="embeddings_vector_db_core",
+            subtopic="langchain_rag_tutorial",
+            url="https://langchain-tutorials.github.io/langchain-rag-tutorial-2026/",
+            source_type="docs",
+            priority_topics=[
+                "what embeddings are",
+                "cosine similarity",
+                "FAISS indexing",
+                "similarity search process",
+                "chunk storage design",
+            ],
+        ),
+        SourceSpec(
+            category="practical_repositories",
+            subtopic="langchain_repo",
+            url="https://github.com/langchain-ai/langchain",
+            source_type="github",
+            priority_topics=[
+                "ingestion pipelines",
+                "loaders",
+                "retrieval chains",
+                "multi-query RAG",
+                "reranking pipelines",
+            ],
+        ),
+        SourceSpec(
+            category="practical_repositories",
+            subtopic="llama_index_repo",
+            url="https://github.com/run-llama/llama_index",
+            source_type="github",
+            priority_topics=[
+                "ingestion pipelines",
+                "loaders",
+                "retrieval chains",
+                "multi-query RAG",
+                "reranking pipelines",
+            ],
+        ),
+        SourceSpec(
+            category="practical_repositories",
+            subtopic="transformers_repo",
+            url="https://github.com/huggingface/transformers",
+            source_type="github",
+            priority_topics=[
+                "ingestion pipelines",
+                "loaders",
+                "retrieval chains",
+                "multi-query RAG",
+                "reranking pipelines",
+            ],
+        ),
+        SourceSpec(
+            category="embedding_theory",
+            subtopic="sbert",
+            url="https://www.sbert.net/",
+            source_type="docs",
+            priority_topics=[
+                "how embeddings work",
+                "semantic similarity",
+                "difference between models",
+                "normalization + cosine similarity",
+            ],
+        ),
+        SourceSpec(
+            category="embedding_theory",
+            subtopic="mteb",
+            url="https://huggingface.co/spaces/mteb/leaderboard",
+            source_type="docs",
+            priority_topics=[
+                "how embeddings work",
+                "semantic similarity",
+                "difference between models",
+                "normalization + cosine similarity",
+            ],
+        ),
+        SourceSpec(
+            category="advanced_rag_ideas",
+            subtopic="langchain_blog_docs",
+            url="https://blog.langchain.dev/",
+            source_type="blog",
+            priority_topics=[
+                "multi-query retrieval",
+                "reranking (cross-encoder)",
+                "hybrid search (BM25 + vector search)",
+                "self-RAG / agentic RAG",
+            ],
+        ),
+        SourceSpec(
+            category="advanced_rag_ideas",
+            subtopic="llamaindex_blog",
+            url="https://www.llamaindex.ai/blog",
+            source_type="blog",
+            priority_topics=[
+                "multi-query retrieval",
+                "reranking (cross-encoder)",
+                "hybrid search (BM25 + vector search)",
+                "self-RAG / agentic RAG",
+            ],
+        ),
+        SourceSpec(
+            category="real_practical_reviews",
+            subtopic="reddit_community",
+            url="https://www.reddit.com/r/LocalLLaMA/",
+            source_type="community",
+            priority_topics=[
+                "chunking problems",
+                "embedding quality differences",
+                "production RAG issues",
+                "latency vs quality tradeoffs",
+            ],
+        ),
+    ]
+
