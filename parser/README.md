@@ -34,7 +34,7 @@ poetry install
 ## Run parser
 
 ```bash
-poetry run rag-parser --output parser/output/rag_dataset.jsonl
+poetry run rag-parser --output data/rag_dataset.jsonl
 ```
 
 Optional chunk config:
@@ -43,22 +43,39 @@ Optional chunk config:
 poetry run rag-parser --min-tokens 300 --max-tokens 800 --overlap-ratio 0.15
 ```
 
-## Optional embeddings input
+## Optional embeddings + Chroma
 
 ```python
 from parser.embeddings import prepare_embedding_input
 prepare_embedding_input(
-    "parser/output/rag_dataset.jsonl",
-    "parser/output/embeddings_input.jsonl",
+    "data/rag_dataset.jsonl",
+    "data/embeddings_input.jsonl",
 )
 ```
 
-This prepares records for later embedding generation and vector DB ingestion.
+This prepares records for embedding generation.
+
+Generate embeddings with `intfloat/e5-small-v2` and store them in local Chroma:
+
+```python
+from parser.embeddings import build_chroma_collection
+build_chroma_collection(
+    input_jsonl="data/embeddings_input.jsonl",
+    persist_directory="data/chroma",
+    collection_name="rag_chunks",
+)
+```
 
 If you want to run this helper from Poetry:
 
 ```bash
 poetry run python -c "from parser.embeddings import prepare_embedding_input; prepare_embedding_input()"
+```
+
+End-to-end (prepare input + embed + Chroma upsert):
+
+```bash
+poetry run python -c "from parser.embeddings import prepare_embedding_input, build_chroma_collection; prepare_embedding_input(); build_chroma_collection()"
 ```
 
 ## Notes

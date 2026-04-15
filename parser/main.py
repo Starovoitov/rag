@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        default="parser/output/rag_dataset.jsonl",
+        default="data/rag_dataset.jsonl",
         help="Output JSONL path.",
     )
     parser.add_argument("--min-tokens", type=int, default=300)

@@ -10,6 +10,8 @@ packages = [{ include = "parser" }]
 python = "^3.10"
 requests = "*"
 trafilatura = "*"
+sentence-transformers = "*"
+chromadb = "*"
 
 [tool.poetry.scripts]
 rag-parser = "parser.main:main"

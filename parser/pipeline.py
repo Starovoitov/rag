@@ -15,7 +15,7 @@ from parser.sources import build_sources
 
 
 def run_pipeline(
-    output_path: str = "parser/output/rag_dataset.jsonl",
+    output_path: str = "data/rag_dataset.jsonl",
     min_tokens: int = 300,
     max_tokens: int = 800,
     overlap_ratio: float = 0.15,
