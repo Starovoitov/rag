@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 
 import requests
-import trafilatura
+try:
+    import trafilatura
+except ModuleNotFoundError:  # pragma: no cover
+    trafilatura = None
 
 from parser.models import ParsedDocument, SourceSpec
 
@@ -13,12 +16,14 @@ def scrape_source(source: SourceSpec, timeout: int = 30) -> ParsedDocument:
     response = requests.get(source.url, timeout=timeout)
     response.raise_for_status()
 
-    downloaded = trafilatura.extract(
-        response.text,
-        include_comments=False,
-        include_links=False,
-        output_format="txt",
-    )
+    downloaded = None
+    if trafilatura is not None:
+        downloaded = trafilatura.extract(
+            response.text,
+            include_comments=False,
+            include_links=False,
+            output_format="txt",
+        )
     text = downloaded or fallback_clean_html(response.text)
     title = extract_title(response.text, source.url)
 
