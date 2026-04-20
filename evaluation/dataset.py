@@ -1,27 +1,14 @@
-#!/usr/bin/env python3
-"""Build a structured evaluation dataset (JSONL) from data/evaluation.txt + rag_dataset.jsonl.
-
-Each line is one JSON object with section, structured question, gold answer, distractor, noise,
-and expected_evidence (chunk_ids, excerpt, resolution method). Items before the first section
-heading use section \"Fundamentals of RAG\".
-
-Resolution order for expected chunk_ids:
-1. Exact match on qa_pair.question → metadata.chunk_id(s)
-2. difflib fuzzy match when ratio >= --fuzzy-ratio
-3. Lexical overlap of keywords from question + answer against raw_chunk (+ metadata)
-"""
-
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import random
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from difflib import SequenceMatcher, get_close_matches
 from pathlib import Path
-
 
 COMMON_RAG_LEXEMES = frozenset(
     {
@@ -79,7 +66,6 @@ SUPPORT_CONCEPT_TERMS = (
     "claims",
 )
 
-
 DEFAULT_STOPWORDS = frozenset(
     """
     a an the is are was were be been being to of and or for in on at by with from as it its
@@ -99,32 +85,36 @@ class EvalBlock:
     noise: str
 
 
-def load_dataset(
-    rag_jsonl: Path,
-) -> tuple[dict[str, list[str]], dict[str, str], list[str]]:
+@dataclass(frozen=True)
+class EvalSample:
+    query: str
+    relevant_docs: list[str]
+    reference_answer: str | None = None
+    metadata: dict[str, object] | None = None
+
+
+def load_dataset(rag_jsonl: Path) -> tuple[dict[str, list[str]], dict[str, str], list[str]]:
     qa_map: dict[str, list[str]] = defaultdict(list)
     chunk_text: dict[str, str] = {}
 
-    with rag_jsonl.open("r", encoding="utf-8") as f:
-        for line in f:
+    with rag_jsonl.open("r", encoding="utf-8") as dataset:
+        for line in dataset:
             row = json.loads(line)
             rtype = row.get("record_type")
             if rtype == "qa_pair":
-                q = str(row.get("question", "")).strip()
+                question = str(row.get("question", "")).strip()
                 meta = row.get("metadata") or {}
-                cid = meta.get("chunk_id")
-                if not q or not cid:
+                chunk_id = meta.get("chunk_id")
+                if not question or not chunk_id:
                     continue
-                cid = str(cid)
-                if cid not in qa_map[q]:
-                    qa_map[q].append(cid)
+                chunk_id = str(chunk_id)
+                if chunk_id not in qa_map[question]:
+                    qa_map[question].append(chunk_id)
             elif rtype == "raw_chunk":
-                cid = row.get("chunk_id")
+                chunk_id = row.get("chunk_id")
                 text = row.get("text")
-                if cid and text is not None:
-                    cid = str(cid)
-                    body = str(text)
-                    chunk_text[cid] = body
+                if chunk_id and text is not None:
+                    chunk_text[str(chunk_id)] = str(text)
 
     return dict(qa_map), chunk_text, sorted(qa_map.keys())
 
@@ -188,8 +178,8 @@ def build_keyword_df(chunk_text: dict[str, str]) -> tuple[dict[str, int], int]:
 def _idf(word: str, keyword_df: dict[str, int], total_chunks: int) -> float:
     if total_chunks <= 0:
         return 1.0
-    df = keyword_df.get(word, 0)
-    return math.log1p(total_chunks / (1 + df))
+    doc_freq = keyword_df.get(word, 0)
+    return math.log1p(total_chunks / (1 + doc_freq))
 
 
 def _metric_terms(answer: str) -> set[str]:
@@ -212,7 +202,6 @@ def _expanded_keywords(words: list[str]) -> list[str]:
     for w in words:
         for alt in expansions.get(w, ()):
             out.append(alt)
-    # Preserve order while deduplicating
     return list(dict.fromkeys(out))
 
 
@@ -238,9 +227,10 @@ def lexical_chunk_ids(
     min_answer_hits = max(2, math.ceil(len(uniq_a) * 0.22)) if uniq_a else 0
     if uniq_a and (metric_terms or concept_terms):
         min_answer_hits = max(1, math.ceil(len(uniq_a) * 0.16))
+
     for cid, text in chunk_text.items():
-        tlow = text.lower()
-        tnorm = tlow.replace(" @ ", "@").replace(" / ", "/")
+        text_low = text.lower()
+        text_norm = text_low.replace(" @ ", "@").replace(" / ", "/")
         matched_q = {w for w in kws_q if word_in_text(w, text)}
         matched_a = {w for w in kws_a if word_in_text(w, text)}
         distinct = len(matched_q) + (2 * len(matched_a))
@@ -248,38 +238,28 @@ def lexical_chunk_ids(
             continue
         if uniq_a and len(matched_a) < min_answer_hits:
             continue
-        if metric_terms:
-            metric_hits = sum(1 for t in metric_terms if t in tnorm)
-            min_metric_hits = 1
-            if metric_hits < min_metric_hits:
-                continue
-        if len(concept_terms) >= 2:
-            concept_hits = sum(1 for t in concept_terms if t in tnorm)
-            min_concept_hits = 1
-            if concept_hits < min_concept_hits:
-                continue
+        if metric_terms and sum(1 for t in metric_terms if t in text_norm) < 1:
+            continue
+        if len(concept_terms) >= 2 and sum(1 for t in concept_terms if t in text_norm) < 1:
+            continue
 
-        phrase_bonus = _phrase_hits(answer_bigrams, tlow)
+        phrase_bonus = _phrase_hits(answer_bigrams, text_low)
         q_weight = sum(_idf(w, keyword_df, total_chunks) * _lexeme_weight(w) for w in matched_q)
         a_weight = sum(_idf(w, keyword_df, total_chunks) * _lexeme_weight(w) for w in matched_a)
-        score = (
-            q_weight
-            + (3.5 * a_weight)
-            + (2.5 * phrase_bonus)
-        )
-        weighted = sum(tlow.count(w) for w in matched_q | matched_a if len(w) >= 3)
+        score = q_weight + (3.5 * a_weight) + (2.5 * phrase_bonus)
+        weighted = sum(text_low.count(w) for w in matched_q | matched_a if len(w) >= 3)
+
         sentence_best = 0
-        for sent in _sentence_split(text):
-            slow = sent.lower()
-            sent_a = {w for w in kws_a if word_in_text(w, sent)}
-            sent_q = {w for w in kws_q if word_in_text(w, sent)}
+        for sentence in _sentence_split(text):
+            sentence_low = sentence.lower()
+            sent_a = {w for w in kws_a if word_in_text(w, sentence)}
+            sent_q = {w for w in kws_q if word_in_text(w, sentence)}
             if kws_a and not sent_a:
                 continue
-            sent_score = (4 * len(sent_a)) + len(sent_q) + (3 * _phrase_hits(answer_bigrams, slow))
+            sent_score = (4 * len(sent_a)) + len(sent_q) + (3 * _phrase_hits(answer_bigrams, sentence_low))
             sentence_best = max(sentence_best, sent_score)
-        min_sentence_score = 5
-        if metric_terms or concept_terms:
-            min_sentence_score = 3
+
+        min_sentence_score = 3 if metric_terms or concept_terms else 5
         if uniq_a and sentence_best < min_sentence_score:
             continue
         rare_answer_terms = {w for w in uniq_a if _idf(w, keyword_df, total_chunks) >= 1.8}
@@ -294,33 +274,25 @@ def lexical_chunk_ids(
     rows.sort(reverse=True)
     top = rows[0]
     top_score, top_sentence, top_answer_ratio = top[0], top[1], top[2]
-    min_ratio = 0.24
-    if metric_terms or concept_terms:
-        min_ratio = 0.12
-    min_top_sentence = 6
-    if metric_terms or concept_terms:
-        min_top_sentence = 4
+    min_ratio = 0.12 if metric_terms or concept_terms else 0.24
+    min_top_sentence = 4 if metric_terms or concept_terms else 6
     if uniq_a and (top_answer_ratio < min_ratio or top_sentence < min_top_sentence or top_score < 8):
         return []
     return [top[5]]
 
 
-def fuzzy_match_question(
-    question: str,
-    qa_questions: list[str],
-    min_ratio: float,
-) -> str | None:
+def fuzzy_match_question(question: str, qa_questions: list[str], min_ratio: float) -> str | None:
     if not qa_questions:
         return None
     q = question.strip()
     candidates = get_close_matches(q, qa_questions, n=1, cutoff=max(0.0, min_ratio - 0.01))
     if not candidates:
         return None
-    cand = candidates[0]
-    ratio = SequenceMatcher(None, q.lower(), cand.lower()).ratio()
+    candidate = candidates[0]
+    ratio = SequenceMatcher(None, q.lower(), candidate.lower()).ratio()
     if ratio < min_ratio:
         return None
-    return cand
+    return candidate
 
 
 def resolve_chunk_ids(
@@ -343,10 +315,9 @@ def resolve_chunk_ids(
     if fuzzy_q and fuzzy_q in qa_map:
         return qa_map[fuzzy_q], "fuzzy"
 
-    lex = lexical_chunk_ids(q, answer, chunk_text, keyword_df, total_chunks, lexical_min_hits)
-    if lex:
-        return lex, "lexical"
-
+    lexical = lexical_chunk_ids(q, answer, chunk_text, keyword_df, total_chunks, lexical_min_hits)
+    if lexical:
+        return lexical, "lexical"
     return [], "none"
 
 
@@ -368,17 +339,17 @@ def excerpt_for_chunk(
     answer_words = _expanded_keywords(keywords(answer_hint))
     query_words = keywords(query_hint)
     answer_bigrams = _ngrams(answer_words, 2)
-    need_retrieval_generator_pair = "retriever" in answer_hint.lower() and "generator" in answer_hint.lower()
+    need_pair = "retriever" in answer_hint.lower() and "generator" in answer_hint.lower()
     sentences = _sentence_split(one_line)
     best_sentence = ""
     best_score = -1
-    for i in range(len(sentences)):
-        window = " ".join(sentences[i : i + 3]).strip()
-        sent_low = window.lower()
+    for idx in range(len(sentences)):
+        window = " ".join(sentences[idx : idx + 3]).strip()
+        window_low = window.lower()
         a_hits = {w for w in answer_words if word_in_text(w, window)}
         q_hits = {w for w in query_words if word_in_text(w, window)}
-        score = (4 * len(a_hits)) + len(q_hits) + (3 * _phrase_hits(answer_bigrams, sent_low))
-        if need_retrieval_generator_pair:
+        score = (4 * len(a_hits)) + len(q_hits) + (3 * _phrase_hits(answer_bigrams, window_low))
+        if need_pair:
             has_retrieval = any(word_in_text(w, window) for w in ("retriever", "retrieval", "retrieve"))
             has_generation = any(word_in_text(w, window) for w in ("generator", "generation", "generate"))
             if has_retrieval and has_generation:
@@ -394,9 +365,9 @@ def excerpt_for_chunk(
     kws = (answer_words + query_words)[:24]
     start = 0
     for w in kws:
-        m = re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", source, re.IGNORECASE)
-        if m:
-            start = max(0, m.start() - max_len // 5)
+        match = re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", source, re.IGNORECASE)
+        if match:
+            start = max(0, match.start() - max_len // 5)
             break
 
     snippet = source[start : start + max_len].strip()
@@ -408,53 +379,52 @@ def excerpt_for_chunk(
 
 
 def parse_evaluation_blocks(lines: list[str]) -> list[EvalBlock]:
-    """Parse plain evaluation.txt (or legacy .txt with evidence lines — those are skipped)."""
     blocks: list[EvalBlock] = []
     section = ""
-    i = 0
-    n = len(lines)
+    idx = 0
+    total = len(lines)
 
-    while i < n:
-        line = lines[i].strip()
+    while idx < total:
+        line = lines[idx].strip()
         if not line:
-            i += 1
+            idx += 1
             continue
         if line.startswith(("Expected Evidence:", "Excerpt:")):
-            i += 1
+            idx += 1
             continue
 
         if line.endswith("?") and not line.startswith(("Distractor:", "Noise:")):
             question = line
-            i += 1
-            while i < n and not lines[i].strip():
-                i += 1
-            if i >= n:
+            idx += 1
+            while idx < total and not lines[idx].strip():
+                idx += 1
+            if idx >= total:
                 break
-            answer = lines[i].strip()
-            i += 1
-            while i < n and not lines[i].strip():
-                i += 1
-            if i >= n:
+            answer = lines[idx].strip()
+            idx += 1
+            while idx < total and not lines[idx].strip():
+                idx += 1
+            if idx >= total:
                 break
-            d_line = lines[i].strip()
-            i += 1
-            if not d_line.startswith("Distractor:"):
-                raise ValueError(f"Expected Distractor after answer, got: {d_line[:80]!r}")
-            distractor = d_line.split(":", 1)[1].strip()
-            while i < n and not lines[i].strip():
-                i += 1
-            if i >= n:
+            distractor_line = lines[idx].strip()
+            idx += 1
+            if not distractor_line.startswith("Distractor:"):
+                raise ValueError(f"Expected Distractor after answer, got: {distractor_line[:80]!r}")
+            distractor = distractor_line.split(":", 1)[1].strip()
+            while idx < total and not lines[idx].strip():
+                idx += 1
+            if idx >= total:
                 break
-            n_line = lines[i].strip()
-            i += 1
-            if not n_line.startswith("Noise:"):
-                raise ValueError(f"Expected Noise after distractor, got: {n_line[:80]!r}")
-            noise = n_line.split(":", 1)[1].strip()
-            blocks.append(EvalBlock(section, question, answer, distractor, noise))
+            noise_line = lines[idx].strip()
+            idx += 1
+            if not noise_line.startswith("Noise:"):
+                raise ValueError(f"Expected Noise after distractor, got: {noise_line[:80]!r}")
+            noise = noise_line.split(":", 1)[1].strip()
+            blocks.append(EvalBlock(section=section, question=question, answer=answer, distractor=distractor, noise=noise))
             continue
 
         section = line
-        i += 1
+        idx += 1
 
     return blocks
 
@@ -474,7 +444,7 @@ def build_jsonl_records(
     stats: dict[str, int] = defaultdict(int)
     records: list[dict[str, object]] = []
 
-    for idx, block in enumerate(blocks):
+    for index, block in enumerate(blocks):
         ids, method = resolve_chunk_ids(
             block.question,
             block.answer,
@@ -504,58 +474,77 @@ def build_jsonl_records(
             stats["no_evidence"] += 1
 
         section_label = block.section or "Fundamentals of RAG"
-        record: dict[str, object] = {
-            "index": idx,
-            "section": section_label,
-            "question": {
-                "stem": block.question,
-                "kind": "open_ended",
-            },
-            "reference_answer": block.answer,
-            "distractor": block.distractor,
-            "noise": block.noise,
-            "expected_evidence": {
-                "chunk_ids": ids,
-                "excerpt": excerpt,
-                "resolution_method": method,
-            },
-        }
-        records.append(record)
+        records.append(
+            {
+                "index": index,
+                "section": section_label,
+                "question": {"stem": block.question, "kind": "open_ended"},
+                "reference_answer": block.answer,
+                "distractor": block.distractor,
+                "noise": block.noise,
+                "expected_evidence": {
+                    "chunk_ids": ids,
+                    "excerpt": excerpt,
+                    "resolution_method": method,
+                },
+            }
+        )
 
     return records, dict(stats)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Build structured evaluation JSONL from evaluation.txt + rag_dataset.jsonl.",
-    )
-    parser.add_argument(
-        "--rag",
-        type=Path,
-        default=Path("data/rag_dataset.jsonl"),
-        help="Path to rag_dataset.jsonl",
-    )
-    parser.add_argument(
-        "--eval",
-        type=Path,
-        default=Path("data/evaluation.txt"),
-        help="Path to evaluation.txt (plain blocks)",
-    )
-    parser.add_argument(
-        "--out",
-        type=Path,
-        default=Path("data/evaluation_with_evidence.jsonl"),
-        help="Output JSONL path",
-    )
-    parser.add_argument("--fuzzy-ratio", type=float, default=0.82)
-    parser.add_argument("--lexical-min-hits", type=int, default=2)
-    parser.add_argument("--excerpt-max", type=int, default=320)
-    args = parser.parse_args()
+def load_eval_samples(path: Path) -> list[EvalSample]:
+    samples: list[EvalSample] = []
+    with path.open("r", encoding="utf-8") as fp:
+        for line in fp:
+            row = json.loads(line)
+            question = row.get("question", {})
+            expected = row.get("expected_evidence", {})
+            query = str(question.get("stem", "")).strip()
+            relevant_docs = [str(doc_id) for doc_id in expected.get("chunk_ids", [])]
+            if not query:
+                continue
+            samples.append(
+                EvalSample(
+                    query=query,
+                    relevant_docs=relevant_docs,
+                    reference_answer=row.get("reference_answer"),
+                    metadata={
+                        "index": row.get("index"),
+                        "section": row.get("section"),
+                        "resolution_method": expected.get("resolution_method"),
+                    },
+                )
+            )
+    return samples
 
-    qa_map, chunk_text, qa_questions = load_dataset(args.rag)
+
+def split_eval_samples(
+    samples: list[EvalSample],
+    val_ratio: float = 0.2,
+    seed: int = 42,
+) -> tuple[list[EvalSample], list[EvalSample]]:
+    if not 0.0 <= val_ratio < 1.0:
+        raise ValueError("val_ratio must be in range [0.0, 1.0).")
+    data = list(samples)
+    rng = random.Random(seed)
+    rng.shuffle(data)
+    val_size = int(len(data) * val_ratio)
+    return data[val_size:], data[:val_size]
+
+
+def build_evaluation_dataset(
+    rag_path: Path,
+    eval_txt_path: Path,
+    out_path: Path,
+    *,
+    fuzzy_ratio: float = 0.82,
+    lexical_min_hits: int = 2,
+    excerpt_max: int = 320,
+) -> tuple[int, dict[str, int]]:
+    qa_map, chunk_text, qa_questions = load_dataset(rag_path)
     keyword_df, total_chunks = build_keyword_df(chunk_text)
-    raw_lines = args.eval.read_text(encoding="utf-8").splitlines()
-    blocks = parse_evaluation_blocks(raw_lines)
+    blocks = parse_evaluation_blocks(eval_txt_path.read_text(encoding="utf-8").splitlines())
     records, stats = build_jsonl_records(
         blocks,
         qa_map,
@@ -563,17 +552,38 @@ def main() -> None:
         keyword_df,
         total_chunks,
         qa_questions,
+        fuzzy_ratio=fuzzy_ratio,
+        lexical_min_hits=lexical_min_hits,
+        excerpt_max=excerpt_max,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as output:
+        for rec in records:
+            output.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return len(records), stats
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build structured evaluation JSONL from evaluation.txt + rag_dataset.jsonl.",
+    )
+    parser.add_argument("--rag", type=Path, default=Path("data/rag_dataset.jsonl"))
+    parser.add_argument("--eval", type=Path, default=Path("data/evaluation.txt"))
+    parser.add_argument("--out", type=Path, default=Path("data/evaluation_with_evidence.jsonl"))
+    parser.add_argument("--fuzzy-ratio", type=float, default=0.82)
+    parser.add_argument("--lexical-min-hits", type=int, default=2)
+    parser.add_argument("--excerpt-max", type=int, default=320)
+    args = parser.parse_args()
+
+    count, stats = build_evaluation_dataset(
+        rag_path=args.rag,
+        eval_txt_path=args.eval,
+        out_path=args.out,
         fuzzy_ratio=args.fuzzy_ratio,
         lexical_min_hits=args.lexical_min_hits,
         excerpt_max=args.excerpt_max,
     )
-
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w", encoding="utf-8") as f_out:
-        for rec in records:
-            f_out.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-    print(f"Wrote {args.out} ({len(records)} records).")
+    print(f"Wrote {args.out} ({count} records).")
     print("Stats:", json.dumps(stats, indent=2))
 
 
