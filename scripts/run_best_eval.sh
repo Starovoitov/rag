@@ -60,9 +60,8 @@ python main.py evaluation_runner \
   --multi-query-rrf-k 60 \
   --stratified-rerank-pool \
   --hard-negative-semantic-floor 0.12 \
-  --rerank-semantic-weight 0.45 \
-  --rerank-bm25-weight 0.35 \
-  --rerank-rank-weight 0.20 \
+  --rerank-semantic-weight 0.55 \
+  --rerank-bm25-weight 0.45 \
   --soft-recall-rescue \
   --soft-recall-rescue-tail-k 20 \
   --soft-recall-rescue-bm25-depth 200 \

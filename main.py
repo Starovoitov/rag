@@ -498,10 +498,6 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
 
             sem_norm = _minmax_normalize(semantic_score_map)
             bm25_norm = _minmax_normalize(bm25_score_map)
-            rank_norm = {
-                doc_id: 1.0 - ((rank - 1) / max(len(retrieved), 1))
-                for rank, doc_id in enumerate(retrieved, start=1)
-            }
             rerank_input = [
                 RerankCandidate(
                     doc_id=doc_id,
@@ -509,12 +505,10 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                     score=(
                         (args.rerank_semantic_weight * sem_norm.get(doc_id, 0.0))
                         + (args.rerank_bm25_weight * bm25_norm.get(doc_id, 0.0))
-                        + (args.rerank_rank_weight * rank_norm.get(doc_id, 0.0))
                     ),
                     metadata={
                         "semantic_norm": sem_norm.get(doc_id, 0.0),
                         "bm25_norm": bm25_norm.get(doc_id, 0.0),
-                        "rank_norm": rank_norm.get(doc_id, 0.0),
                     },
                 )
                 for rank, doc_id in enumerate(retrieved, start=1)
@@ -613,7 +607,6 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         "rerank_prior_weights": {
             "semantic": args.rerank_semantic_weight,
             "bm25": args.rerank_bm25_weight,
-            "rank": args.rerank_rank_weight,
         },
         "soft_recall_rescue_enabled": args.soft_recall_rescue,
         "soft_recall_rescue_tail_k": args.soft_recall_rescue_tail_k if args.soft_recall_rescue else 0,
@@ -792,9 +785,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.0,
         help="Drop rerank candidates with normalized semantic score below threshold.",
     )
-    eval_cmd.add_argument("--rerank-semantic-weight", type=float, default=0.45)
-    eval_cmd.add_argument("--rerank-bm25-weight", type=float, default=0.35)
-    eval_cmd.add_argument("--rerank-rank-weight", type=float, default=0.20)
+    eval_cmd.add_argument("--rerank-semantic-weight", type=float, default=0.55)
+    eval_cmd.add_argument("--rerank-bm25-weight", type=float, default=0.45)
     eval_cmd.add_argument(
         "--two-stage-rerank",
         action="store_true",
