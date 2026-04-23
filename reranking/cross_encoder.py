@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 from sentence_transformers import CrossEncoder
@@ -53,12 +54,37 @@ class CrossEncoderReranker:
         top_k: int = 5,
         batch_size: int = 32,
         alpha: float = 0.75,
+        ce_calibration: str = "minmax",
+        ce_temperature: float = 1.0,
     ) -> list[RerankedResult]:
         def normalize(scores: list[float]) -> list[float]:
             min_s, max_s = min(scores), max(scores)
             if max_s - min_s < 1e-6:
                 return [0.5] * len(scores)
             return [(s - min_s) / (max_s - min_s) for s in scores]
+
+        def calibrate_ce_scores(scores: list[float], mode: str, temperature: float) -> list[float]:
+            t = max(temperature, 1e-6)
+            if mode == "minmax":
+                return normalize(scores)
+            if mode == "softmax":
+                shifted = [score / t for score in scores]
+                max_s = max(shifted)
+                exps = [math.exp(score - max_s) for score in shifted]
+                total = sum(exps)
+                if total <= 0:
+                    return [0.5] * len(scores)
+                return [value / total for value in exps]
+            if mode == "zscore":
+                mean = sum(scores) / len(scores)
+                variance = sum((score - mean) ** 2 for score in scores) / len(scores)
+                std = math.sqrt(variance)
+                if std < 1e-6:
+                    return [0.5] * len(scores)
+                z_scores = [(score - mean) / std for score in scores]
+                # Sigmoid to keep output in [0,1] for stable fusion.
+                return [1.0 / (1.0 + math.exp(-(z / t))) for z in z_scores]
+            raise ValueError(f"Unsupported ce_calibration: {mode}")
 
         if not candidates or top_k <= 0:
             return []
@@ -69,7 +95,7 @@ class CrossEncoderReranker:
 
         ce_scores = [float(score) for score in scores]
         base_scores = [float(candidate.score) for candidate in filtered_candidates]
-        ce_norm = normalize(ce_scores)
+        ce_norm = calibrate_ce_scores(ce_scores, ce_calibration, ce_temperature)
         base_norm = normalize(base_scores)
 
         reranked = []

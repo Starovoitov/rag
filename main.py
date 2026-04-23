@@ -531,6 +531,8 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 rerank_input,
                 top_k=retrieve_k,
                 alpha=args.rerank_alpha,
+                ce_calibration=args.ce_calibration,
+                ce_temperature=args.ce_temperature,
             )
             retrieved = [item.doc_id for item in reranked]
         else:
@@ -608,6 +610,8 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             "semantic": args.rerank_semantic_weight,
             "bm25": args.rerank_bm25_weight,
         },
+        "ce_calibration": args.ce_calibration if args.rerank else None,
+        "ce_temperature": args.ce_temperature if args.rerank else None,
         "soft_recall_rescue_enabled": args.soft_recall_rescue,
         "soft_recall_rescue_tail_k": args.soft_recall_rescue_tail_k if args.soft_recall_rescue else 0,
         "soft_recall_rescue_bm25_depth": args.soft_recall_rescue_bm25_depth if args.soft_recall_rescue else 0,
@@ -774,6 +778,18 @@ def build_parser() -> argparse.ArgumentParser:
     eval_cmd.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     eval_cmd.add_argument("--rerank-candidates", type=int, default=20)
     eval_cmd.add_argument("--rerank-alpha", type=float, default=0.75)
+    eval_cmd.add_argument(
+        "--ce-calibration",
+        choices=("minmax", "softmax", "zscore"),
+        default="minmax",
+        help="How to normalize CE scores per query before fusion with prior scores.",
+    )
+    eval_cmd.add_argument(
+        "--ce-temperature",
+        type=float,
+        default=1.0,
+        help="Temperature for CE calibration modes (softmax/zscore). >1 flattens scores.",
+    )
     eval_cmd.add_argument(
         "--stratified-rerank-pool",
         action="store_true",

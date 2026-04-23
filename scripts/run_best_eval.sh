@@ -53,6 +53,8 @@ python main.py evaluation_runner \
   --embedding-model "$EMBEDDING_MODEL" \
   --rerank-candidates 40 \
   --rerank-alpha 0.45 \
+  --ce-calibration zscore \
+  --ce-temperature 1.0 \
   --hybrid-candidate-multiplier 80 \
   --hybrid-rrf-k 80 \
   --multi-query \
