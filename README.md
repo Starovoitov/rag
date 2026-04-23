@@ -15,10 +15,17 @@ Use the root CLI:
 python main.py --help
 ```
 
+Recommended daily command (full tuned pipeline + reranker training):
+
+```bash
+python main.py reranker_pipeline --train-reranker
+```
+
 Available commands:
 - `build_parser` - build `data/rag_dataset.jsonl`
 - `demo_retrieval` - run BM25 + semantic + hybrid retrieval demo
 - `evaluation_runner` - run retrieval benchmark on evaluation dataset
+- `reranker_pipeline` - run tuned retrieval eval + export failure-driven reranker dataset (+ optional train)
 - `run_rag` - run full RAG query against selected LLM provider
 - `cleanup_faiss` - remove FAISS index (optionally remove full FAISS directory)
 
@@ -127,7 +134,26 @@ With cross-encoder reranking:
 python main.py run_rag --question "What is RAG?" --provider openai --rerank --reranker-model cross-encoder/ms-marco-MiniLM-L-6-v2 --rerank-candidates 20
 ```
 
-### 6) Cleanup FAISS
+### 6) One-shot reranker pipeline
+
+Run tuned retrieval evaluation and export hard-negative reranker training data in one command:
+
+```bash
+python main.py reranker_pipeline
+```
+
+Run full pipeline with in-loop reranker training:
+
+```bash
+python main.py reranker_pipeline --train-reranker
+```
+
+Default outputs:
+- report: `data/retrieval_report_best.json`
+- pairwise training data (`reranker_pairwise_v1`): `data/reranker_train.jsonl`
+- trained model (if `--train-reranker`): `models/reranker-failure-driven`
+
+### 7) Cleanup FAISS
 
 Delete one FAISS index:
 

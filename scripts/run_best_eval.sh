@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 EMBEDDING_MODEL="intfloat/e5-base-v2"
+RERANKER_MODEL="${RERANKER_MODEL:-models/reranker-failure-driven}"
+if [[ ! -d "$RERANKER_MODEL" ]]; then
+  RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
+fi
 
 # Current stable config:
 # - balanced parser dataset build
@@ -70,7 +74,7 @@ python main.py evaluation_runner \
   --mmr-before-rerank \
   --mmr-lambda 0.82 \
   --mmr-k 30 \
-  --reranker-model cross-encoder/ms-marco-MiniLM-L-6-v2 \
+  --reranker-model "$RERANKER_MODEL" \
   --require-evidence \
   --two-stage-rerank \
   --out-json data/retrieval_report_best.json

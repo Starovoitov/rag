@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from collections import Counter
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import TYPE_CHECKING
 from utils.common import tokenize
 
@@ -438,6 +440,155 @@ def _source_miss_type(
     return "both_hit"
 
 
+def _build_reranker_training_pairs_from_failures(
+    *,
+    failure_records: list[dict[str, object]],
+    doc_text_map: dict[str, str],
+    max_negative_rank: int,
+    max_negatives_per_positive: int,
+    ranking_cutoff_weight: float,
+    true_recall_weight: float,
+    default_weight: float,
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    pairs: list[dict[str, object]] = []
+    stats = {
+        "samples_seen": 0,
+        "samples_used": 0,
+        "pairs_written": 0,
+        "pairs_ranking_cutoff_failure": 0,
+        "pairs_true_recall_failure": 0,
+        "pairs_other": 0,
+        "missing_positive_text": 0,
+        "missing_negative_text": 0,
+    }
+    for sample in failure_records:
+        stats["samples_seen"] += 1
+        query = str(sample.get("query", "")).strip()
+        bucket = str(sample.get("bucket", ""))
+        source_miss_type = str(sample.get("source_miss_type", ""))
+        positives = [str(doc_id) for doc_id in sample.get("relevant_doc_ids", [])]
+        retrieved = [str(doc_id) for doc_id in sample.get("retrieved_top_k_doc_ids", [])]
+        if not query or not positives or not retrieved:
+            continue
+        stats["samples_used"] += 1
+
+        if bucket == "ranking_cutoff_failure":
+            sample_weight = ranking_cutoff_weight
+        elif bucket == "true_recall_failure":
+            sample_weight = true_recall_weight
+        else:
+            sample_weight = default_weight
+
+        negatives = [doc_id for doc_id in retrieved[:max_negative_rank] if doc_id not in set(positives)]
+        for positive_id in positives:
+            positive_text = doc_text_map.get(positive_id, "")
+            if not positive_text:
+                stats["missing_positive_text"] += 1
+                continue
+            negatives_added = 0
+            for rank, negative_id in enumerate(negatives, start=1):
+                if negatives_added >= max_negatives_per_positive:
+                    break
+                negative_text = doc_text_map.get(negative_id, "")
+                if not negative_text:
+                    stats["missing_negative_text"] += 1
+                    continue
+                pairs.append(
+                    {
+                        "schema_version": "reranker_pairwise_v1",
+                        "query": query,
+                        "positive": {"doc_id": positive_id, "text": positive_text},
+                        "negative": {"doc_id": negative_id, "text": negative_text, "rank": rank},
+                        "sample_weight": sample_weight,
+                        "failure_bucket": bucket,
+                        "source_miss_type": source_miss_type,
+                    }
+                )
+                negatives_added += 1
+                stats["pairs_written"] += 1
+                if bucket == "ranking_cutoff_failure":
+                    stats["pairs_ranking_cutoff_failure"] += 1
+                elif bucket == "true_recall_failure":
+                    stats["pairs_true_recall_failure"] += 1
+                else:
+                    stats["pairs_other"] += 1
+    return pairs, stats
+
+
+def _train_reranker_from_pairs_jsonl(
+    *,
+    train_jsonl: Path,
+    model_name: str,
+    out_dir: Path,
+    epochs: int,
+    batch_size: int,
+    warmup_steps: int,
+    val_ratio: float,
+    seed: int,
+) -> dict[str, object]:
+    from sentence_transformers import InputExample
+    from sentence_transformers.cross_encoder import CrossEncoder
+    from sentence_transformers.cross_encoder.evaluation import CEBinaryClassificationEvaluator
+    from torch.utils.data import DataLoader
+
+    rows = [json.loads(line) for line in train_jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
+    random.Random(seed).shuffle(rows)
+
+    examples: list[InputExample] = []
+    for row in rows:
+        query = str(row.get("query", "")).strip()
+        if "positive_text" in row and "negative_text" in row:
+            positive_text = str(row.get("positive_text", "")).strip()
+            negative_text = str(row.get("negative_text", "")).strip()
+        else:
+            positive = row.get("positive", {})
+            negative = row.get("negative", {})
+            positive_text = str((positive or {}).get("text", "")).strip()
+            negative_text = str((negative or {}).get("text", "")).strip()
+        sample_weight = float(row.get("sample_weight", 1.0))
+        if not query or not positive_text or not negative_text:
+            continue
+        repeats = max(1, int(round(sample_weight)))
+        for _ in range(repeats):
+            examples.append(InputExample(texts=[query, positive_text], label=1.0))
+            examples.append(InputExample(texts=[query, negative_text], label=0.0))
+
+    if not examples:
+        raise ValueError("No train examples built from reranker JSONL.")
+
+    val_size = int(len(examples) * max(0.0, min(val_ratio, 0.5)))
+    val_examples = examples[:val_size]
+    train_examples = examples[val_size:]
+    if not train_examples:
+        raise ValueError("No train split left after validation split.")
+
+    model = CrossEncoder(model_name, num_labels=1, max_length=512)
+    train_loader = DataLoader(train_examples, shuffle=True, batch_size=batch_size)
+    evaluator = None
+    if val_examples:
+        evaluator = CEBinaryClassificationEvaluator.from_input_examples(val_examples, name="failure-driven-val")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.fit(
+        train_dataloader=train_loader,
+        evaluator=evaluator,
+        epochs=epochs,
+        warmup_steps=warmup_steps,
+        output_path=str(out_dir),
+        show_progress_bar=True,
+    )
+    # Ensure a loadable model exists at output path for subsequent evaluation.
+    model.save(str(out_dir))
+    return {
+        "out_dir": str(out_dir),
+        "model": model_name,
+        "train_examples": len(train_examples),
+        "val_examples": len(val_examples),
+        "epochs": epochs,
+        "batch_size": batch_size,
+    }
+
+
 def cmd_build_parser(args: argparse.Namespace) -> None:
     from parser.pipeline import run_pipeline
 
@@ -474,8 +625,6 @@ def cmd_demo_retrieval(args: argparse.Namespace) -> None:
 
 
 def cmd_evaluation_runner(args: argparse.Namespace) -> None:
-    from pathlib import Path
-
     from evaluation.dataset import load_eval_samples
     from evaluation.metrics import RetrievalResult, evaluate_retrieval
     from evaluation.runner import QueryRun, build_retriever, parse_k_values
@@ -750,6 +899,45 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         "runs": [run.__dict__ for run in query_runs],
     }
 
+    reranker_dataset_export: dict[str, object] | None = None
+    reranker_training_result: dict[str, object] | None = None
+    if args.export_reranker_train_jsonl or args.train_reranker:
+        out_jsonl = Path(args.export_reranker_train_jsonl or "data/reranker_train.jsonl")
+        pairs, pair_stats = _build_reranker_training_pairs_from_failures(
+            failure_records=failure_records,
+            doc_text_map=doc_text_map,
+            max_negative_rank=max(1, args.reranker_train_max_negative_rank),
+            max_negatives_per_positive=max(1, args.reranker_train_max_negatives_per_positive),
+            ranking_cutoff_weight=max(0.1, args.reranker_train_weight_ranking_cutoff),
+            true_recall_weight=max(0.1, args.reranker_train_weight_true_recall),
+            default_weight=max(0.1, args.reranker_train_weight_default),
+        )
+        out_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        with out_jsonl.open("w", encoding="utf-8") as fp:
+            for row in pairs:
+                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+        reranker_dataset_export = {
+            "path": str(out_jsonl),
+            "pairs": len(pairs),
+            "stats": pair_stats,
+            "schema_version": "reranker_pairwise_v1",
+        }
+        report["reranker_dataset_export"] = reranker_dataset_export
+        print(f"- reranker_dataset_export: {out_jsonl} ({len(pairs)} pairs)")
+        if args.train_reranker:
+            reranker_training_result = _train_reranker_from_pairs_jsonl(
+                train_jsonl=out_jsonl,
+                model_name=args.train_reranker_model,
+                out_dir=Path(args.train_reranker_out_dir),
+                epochs=max(1, args.train_reranker_epochs),
+                batch_size=max(1, args.train_reranker_batch_size),
+                warmup_steps=max(0, args.train_reranker_warmup_steps),
+                val_ratio=args.train_reranker_val_ratio,
+                seed=args.train_reranker_seed,
+            )
+            report["reranker_training"] = reranker_training_result
+            print(f"- reranker_training_out: {reranker_training_result['out_dir']}")
+
     print("Retrieval benchmark report")
     print(f"- dataset: {args.dataset}")
     print(f"- retriever: {args.retriever}")
@@ -815,6 +1003,69 @@ def cmd_cleanup_faiss(args: argparse.Namespace) -> None:
         drop_persist_directory=args.drop_persist_directory,
     )
     print(json.dumps(result, indent=2))
+
+
+def cmd_reranker_pipeline(args: argparse.Namespace) -> None:
+    eval_args = argparse.Namespace(
+        # Core IO
+        dataset=args.dataset,
+        rag_dataset=args.rag_dataset,
+        faiss_path=args.faiss_path,
+        index=args.index,
+        out_json=args.out_json,
+        # Retrieval stack defaults (current tuned setup)
+        retriever="hybrid",
+        k_values=args.k_values,
+        embedding_model=args.embedding_model,
+        alpha=0.65,
+        hybrid_candidate_multiplier=80,
+        hybrid_max_per_group=1,
+        hybrid_rrf_k=80.0,
+        # Reranker stack defaults
+        rerank=True,
+        reranker_model=args.reranker_model,
+        rerank_candidates=40,
+        rerank_alpha=0.45,
+        ce_calibration="zscore",
+        ce_temperature=1.0,
+        stratified_rerank_pool=True,
+        hard_negative_semantic_floor=0.12,
+        rerank_semantic_weight=0.55,
+        rerank_bm25_weight=0.45,
+        two_stage_rerank=True,
+        prefilter_candidates=40,
+        # Multi-query + rescue + MMR defaults
+        multi_query=True,
+        multi_query_variants=3,
+        multi_query_rrf_k=60,
+        soft_recall_rescue=True,
+        soft_recall_rescue_tail_k=20,
+        soft_recall_rescue_bm25_depth=200,
+        mmr_before_rerank=True,
+        mmr_lambda=0.82,
+        mmr_k=30,
+        mmr_diversity_threshold=0.0,
+        # Failure analysis defaults
+        require_evidence=True,
+        failure_near_miss_threshold=0.80,
+        failure_sample_size=20,
+        # Integrated reranker dataset + train toggles
+        export_reranker_train_jsonl=args.export_reranker_train_jsonl,
+        reranker_train_max_negative_rank=20,
+        reranker_train_max_negatives_per_positive=8,
+        reranker_train_weight_ranking_cutoff=2.0,
+        reranker_train_weight_true_recall=1.5,
+        reranker_train_weight_default=1.0,
+        train_reranker=args.train_reranker,
+        train_reranker_model=args.train_reranker_model,
+        train_reranker_out_dir=args.train_reranker_out_dir,
+        train_reranker_epochs=args.train_reranker_epochs,
+        train_reranker_batch_size=args.train_reranker_batch_size,
+        train_reranker_warmup_steps=args.train_reranker_warmup_steps,
+        train_reranker_val_ratio=args.train_reranker_val_ratio,
+        train_reranker_seed=args.train_reranker_seed,
+    )
+    cmd_evaluation_runner(eval_args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -977,8 +1228,57 @@ def build_parser() -> argparse.ArgumentParser:
         default=20,
         help="Number of failed queries to include for manual inspection.",
     )
+    eval_cmd.add_argument(
+        "--export-reranker-train-jsonl",
+        default=None,
+        help="Optional path to export pairwise hard-negative reranker training dataset.",
+    )
+    eval_cmd.add_argument("--reranker-train-max-negative-rank", type=int, default=20)
+    eval_cmd.add_argument("--reranker-train-max-negatives-per-positive", type=int, default=8)
+    eval_cmd.add_argument("--reranker-train-weight-ranking-cutoff", type=float, default=2.0)
+    eval_cmd.add_argument("--reranker-train-weight-true-recall", type=float, default=1.5)
+    eval_cmd.add_argument("--reranker-train-weight-default", type=float, default=1.0)
+    eval_cmd.add_argument(
+        "--train-reranker",
+        action="store_true",
+        help="Train reranker in the same run after exporting hard-negative dataset.",
+    )
+    eval_cmd.add_argument("--train-reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    eval_cmd.add_argument("--train-reranker-out-dir", default="models/reranker-failure-driven")
+    eval_cmd.add_argument("--train-reranker-epochs", type=int, default=2)
+    eval_cmd.add_argument("--train-reranker-batch-size", type=int, default=16)
+    eval_cmd.add_argument("--train-reranker-warmup-steps", type=int, default=100)
+    eval_cmd.add_argument("--train-reranker-val-ratio", type=float, default=0.1)
+    eval_cmd.add_argument("--train-reranker-seed", type=int, default=42)
     eval_cmd.add_argument("--out-json", default=None)
     eval_cmd.set_defaults(handler=cmd_evaluation_runner)
+
+    rerank_pipeline_cmd = subparsers.add_parser(
+        "reranker_pipeline",
+        help="One-shot eval + failure dataset export + optional reranker training.",
+    )
+    rerank_pipeline_cmd.add_argument("--dataset", default="data/evaluation_with_evidence.jsonl")
+    rerank_pipeline_cmd.add_argument("--rag-dataset", default="data/rag_dataset.jsonl")
+    rerank_pipeline_cmd.add_argument("--faiss-path", default="data/faiss")
+    rerank_pipeline_cmd.add_argument("--index", default="rag_chunks")
+    rerank_pipeline_cmd.add_argument("--embedding-model", default="intfloat/e5-base-v2")
+    rerank_pipeline_cmd.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    rerank_pipeline_cmd.add_argument("--k-values", default="1,10,20")
+    rerank_pipeline_cmd.add_argument("--out-json", default="data/retrieval_report_best.json")
+    rerank_pipeline_cmd.add_argument(
+        "--export-reranker-train-jsonl",
+        default="data/reranker_train.jsonl",
+        help="Path for exported reranker pairwise training dataset.",
+    )
+    rerank_pipeline_cmd.add_argument("--train-reranker", action="store_true")
+    rerank_pipeline_cmd.add_argument("--train-reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    rerank_pipeline_cmd.add_argument("--train-reranker-out-dir", default="models/reranker-failure-driven")
+    rerank_pipeline_cmd.add_argument("--train-reranker-epochs", type=int, default=2)
+    rerank_pipeline_cmd.add_argument("--train-reranker-batch-size", type=int, default=16)
+    rerank_pipeline_cmd.add_argument("--train-reranker-warmup-steps", type=int, default=100)
+    rerank_pipeline_cmd.add_argument("--train-reranker-val-ratio", type=float, default=0.1)
+    rerank_pipeline_cmd.add_argument("--train-reranker-seed", type=int, default=42)
+    rerank_pipeline_cmd.set_defaults(handler=cmd_reranker_pipeline)
 
     rag_cmd = subparsers.add_parser("run_rag", help="Run full RAG query against selected LLM provider.")
     rag_cmd.add_argument("--question", "-q", required=True)

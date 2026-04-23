@@ -13,6 +13,8 @@ trafilatura = "*"
 sentence-transformers = "*"
 faiss-cpu = "*"
 retry = "*"
+datasets = "^4.8.4"
+accelerate = "^1.13.0"
 
 [tool.poetry.scripts]
 rag-parser = "parser.main:main"
