@@ -9,6 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from difflib import SequenceMatcher, get_close_matches
 from pathlib import Path
+from typing import Any
 
 COMMON_RAG_LEXEMES = frozenset(
     {
@@ -93,9 +94,10 @@ class EvalSample:
     metadata: dict[str, object] | None = None
 
 
-def load_dataset(rag_jsonl: Path) -> tuple[dict[str, list[str]], dict[str, str], list[str]]:
+def load_dataset(rag_jsonl: Path) -> tuple[dict[str, list[str]], dict[str, str], dict[str, str], list[str]]:
     qa_map: dict[str, list[str]] = defaultdict(list)
     chunk_text: dict[str, str] = {}
+    chunk_url: dict[str, str] = {}
 
     with rag_jsonl.open("r", encoding="utf-8") as dataset:
         for line in dataset:
@@ -114,9 +116,12 @@ def load_dataset(rag_jsonl: Path) -> tuple[dict[str, list[str]], dict[str, str],
                 chunk_id = row.get("chunk_id")
                 text = row.get("text")
                 if chunk_id and text is not None:
-                    chunk_text[str(chunk_id)] = str(text)
+                    chunk_id_s = str(chunk_id)
+                    chunk_text[chunk_id_s] = str(text)
+                    meta = row.get("metadata") or {}
+                    chunk_url[chunk_id_s] = str(meta.get("url", ""))
 
-    return dict(qa_map), chunk_text, sorted(qa_map.keys())
+    return dict(qa_map), chunk_text, chunk_url, sorted(qa_map.keys())
 
 
 def keywords(text: str) -> list[str]:
@@ -212,6 +217,7 @@ def lexical_chunk_ids(
     keyword_df: dict[str, int],
     total_chunks: int,
     min_hits: int,
+    max_chunk_ids: int,
 ) -> list[str]:
     kws_q = keywords(question)
     kws_a = keywords(answer or "")
@@ -219,6 +225,8 @@ def lexical_chunk_ids(
     answer_text_low = (answer or "").lower()
     concept_terms = {t for t in SUPPORT_CONCEPT_TERMS if t in answer_text_low}
     answer_bigrams = _ngrams(kws_a, 2)
+    if max_chunk_ids <= 0:
+        return []
     if not kws_q and not kws_a:
         return []
 
@@ -278,7 +286,27 @@ def lexical_chunk_ids(
     min_top_sentence = 4 if metric_terms or concept_terms else 6
     if uniq_a and (top_answer_ratio < min_ratio or top_sentence < min_top_sentence or top_score < 8):
         return []
-    return [top[5]]
+    selected: list[str] = []
+    min_score_ratio = 0.78
+    min_sentence_ratio = 0.72
+    min_answer_ratio_drop = 0.18
+    top_ids = {top[5]}
+    for row in rows:
+        cid = row[5]
+        if cid in top_ids:
+            selected.append(cid)
+            continue
+        if len(selected) >= max_chunk_ids:
+            break
+        row_score, row_sentence, row_answer_ratio = row[0], row[1], row[2]
+        if row_score < (top_score * min_score_ratio):
+            continue
+        if top_sentence > 0 and row_sentence < (top_sentence * min_sentence_ratio):
+            continue
+        if uniq_a and row_answer_ratio + min_answer_ratio_drop < top_answer_ratio:
+            continue
+        selected.append(cid)
+    return selected[:max_chunk_ids]
 
 
 def fuzzy_match_question(question: str, qa_questions: list[str], min_ratio: float) -> str | None:
@@ -295,6 +323,64 @@ def fuzzy_match_question(question: str, qa_questions: list[str], min_ratio: floa
     return candidate
 
 
+def _dot(vec_a: list[float], vec_b: list[float]) -> float:
+    return sum(a * b for a, b in zip(vec_a, vec_b))
+
+
+def build_semantic_index(
+    chunk_text: dict[str, str],
+    *,
+    model_name: str,
+) -> dict[str, Any]:
+    from sentence_transformers import SentenceTransformer
+
+    chunk_ids = list(chunk_text.keys())
+    chunk_inputs = [f"passage: {chunk_text[cid]}" for cid in chunk_ids]
+    embedder = SentenceTransformer(model_name)
+    chunk_embeddings = embedder.encode(
+        chunk_inputs,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )
+    return {
+        "embedder": embedder,
+        "chunk_ids": chunk_ids,
+        "chunk_embeddings": [list(vec) for vec in chunk_embeddings],
+    }
+
+
+def semantic_chunk_ids(
+    question: str,
+    answer: str | None,
+    semantic_index: dict[str, Any],
+    *,
+    max_chunk_ids: int,
+    min_score: float,
+) -> list[str]:
+    if max_chunk_ids <= 0:
+        return []
+    query_text = f"query: {question.strip()} {answer or ''}".strip()
+    query_embedding = semantic_index["embedder"].encode(
+        [query_text],
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )[0]
+    query_vec = list(query_embedding)
+    scored: list[tuple[float, str]] = []
+    for cid, chunk_vec in zip(semantic_index["chunk_ids"], semantic_index["chunk_embeddings"]):
+        score = _dot(query_vec, chunk_vec)
+        if score >= min_score:
+            scored.append((score, cid))
+    scored.sort(reverse=True)
+    return [cid for _, cid in scored[:max_chunk_ids]]
+
+
+def _clip_ids(ids: list[str], max_chunk_ids: int) -> list[str]:
+    if max_chunk_ids <= 0:
+        return []
+    return ids[:max_chunk_ids]
+
+
 def resolve_chunk_ids(
     question: str,
     answer: str | None,
@@ -306,16 +392,30 @@ def resolve_chunk_ids(
     *,
     fuzzy_ratio: float,
     lexical_min_hits: int,
+    max_chunk_ids: int,
+    semantic_index: dict[str, Any] | None,
+    semantic_min_score: float,
 ) -> tuple[list[str], str]:
     q = question.strip()
     if q in qa_map:
-        return qa_map[q], "exact"
+        return _clip_ids(qa_map[q], max_chunk_ids), "exact"
 
     fuzzy_q = fuzzy_match_question(q, qa_questions, fuzzy_ratio)
     if fuzzy_q and fuzzy_q in qa_map:
-        return qa_map[fuzzy_q], "fuzzy"
+        return _clip_ids(qa_map[fuzzy_q], max_chunk_ids), "fuzzy"
 
-    lexical = lexical_chunk_ids(q, answer, chunk_text, keyword_df, total_chunks, lexical_min_hits)
+    if semantic_index is not None:
+        semantic_ids = semantic_chunk_ids(
+            q,
+            answer,
+            semantic_index,
+            max_chunk_ids=max_chunk_ids,
+            min_score=semantic_min_score,
+        )
+        if semantic_ids:
+            return semantic_ids, "semantic"
+
+    lexical = lexical_chunk_ids(q, answer, chunk_text, keyword_df, total_chunks, lexical_min_hits, max_chunk_ids)
     if lexical:
         return lexical, "lexical"
     return [], "none"
@@ -439,7 +539,10 @@ def build_jsonl_records(
     *,
     fuzzy_ratio: float,
     lexical_min_hits: int,
+    max_chunk_ids: int,
     excerpt_max: int,
+    semantic_index: dict[str, Any] | None,
+    semantic_min_score: float,
 ) -> tuple[list[dict[str, object]], dict[str, int]]:
     stats: dict[str, int] = defaultdict(int)
     records: list[dict[str, object]] = []
@@ -455,6 +558,9 @@ def build_jsonl_records(
             qa_questions,
             fuzzy_ratio=fuzzy_ratio,
             lexical_min_hits=lexical_min_hits,
+            max_chunk_ids=max_chunk_ids,
+            semantic_index=semantic_index,
+            semantic_min_score=semantic_min_score,
         )
         stats[f"blocks_{method}"] += 1
         stats["blocks_total"] += 1
@@ -491,6 +597,92 @@ def build_jsonl_records(
         )
 
     return records, dict(stats)
+
+
+def rebalance_url_share(
+    records: list[dict[str, object]],
+    chunk_url: dict[str, str],
+    *,
+    max_url_share: float,
+) -> list[dict[str, object]]:
+    if max_url_share <= 0.0 or max_url_share >= 1.0:
+        return records
+    total_refs = sum(
+        len((rec.get("expected_evidence") or {}).get("chunk_ids", []))  # type: ignore[union-attr]
+        for rec in records
+    )
+    if total_refs <= 0:
+        return records
+    cap = max(1, int(total_refs * max_url_share))
+    per_url_count: dict[str, int] = defaultdict(int)
+    out: list[dict[str, object]] = []
+    for rec in records:
+        expected = dict(rec.get("expected_evidence") or {})
+        ids = [str(cid) for cid in expected.get("chunk_ids", [])]
+        if not ids:
+            out.append(rec)
+            continue
+        kept: list[str] = []
+        for cid in ids:
+            url = chunk_url.get(cid, "")
+            if not url or per_url_count[url] < cap:
+                kept.append(cid)
+        if not kept:
+            fallback = min(ids, key=lambda cid: per_url_count.get(chunk_url.get(cid, ""), 0))
+            kept = [fallback]
+        for cid in kept:
+            url = chunk_url.get(cid, "")
+            if url:
+                per_url_count[url] = per_url_count.get(url, 0) + 1
+        expected["chunk_ids"] = kept
+        rec = dict(rec)
+        rec["expected_evidence"] = expected
+        out.append(rec)
+    return out
+
+
+def rebalance_multi_gt_share(
+    records: list[dict[str, object]],
+    *,
+    target_multi_gt_share: float,
+    keep_max_ids_for_multi: int,
+) -> list[dict[str, object]]:
+    if target_multi_gt_share >= 1.0:
+        return records
+    if target_multi_gt_share < 0.0:
+        target_multi_gt_share = 0.0
+    keep_max_ids_for_multi = max(1, keep_max_ids_for_multi)
+    total = len(records)
+    if total <= 0:
+        return records
+    current_multi = sum(
+        1 for rec in records if len((rec.get("expected_evidence") or {}).get("chunk_ids", [])) > 1  # type: ignore[union-attr]
+    )
+    allowed_multi = int(total * target_multi_gt_share)
+    if current_multi <= allowed_multi:
+        return records
+
+    # Reduce multi-GT first on less reliable methods.
+    method_rank = {"lexical": 0, "semantic": 1, "fuzzy": 2, "exact": 3, "manual_fill": 4}
+    reducible: list[tuple[int, int, int]] = []
+    for idx, rec in enumerate(records):
+        expected = rec.get("expected_evidence") or {}
+        ids = expected.get("chunk_ids", [])
+        if len(ids) <= 1:
+            continue
+        method = str(expected.get("resolution_method", "lexical"))
+        reducible.append((method_rank.get(method, 0), -len(ids), idx))
+    reducible.sort()
+    need_reduce = current_multi - allowed_multi
+
+    for _, _, idx in reducible[:need_reduce]:
+        rec = dict(records[idx])
+        expected = dict(rec.get("expected_evidence") or {})
+        ids = [str(cid) for cid in expected.get("chunk_ids", [])]
+        expected["chunk_ids"] = ids[:keep_max_ids_for_multi]
+        rec["expected_evidence"] = expected
+        records[idx] = rec
+    return records
 
 
 def load_eval_samples(path: Path) -> list[EvalSample]:
@@ -538,12 +730,22 @@ def build_evaluation_dataset(
     eval_txt_path: Path,
     out_path: Path,
     *,
-    fuzzy_ratio: float = 0.82,
+    fuzzy_ratio: float = 0.86,
     lexical_min_hits: int = 2,
+    max_chunk_ids: int = 2,
+    semantic_fallback: bool = True,
+    semantic_model: str = "intfloat/e5-small-v2",
+    semantic_min_score: float = 0.56,
+    max_gt_url_share: float = 0.25,
+    target_multi_gt_share: float = 0.4,
+    keep_max_ids_for_multi: int = 1,
     excerpt_max: int = 320,
 ) -> tuple[int, dict[str, int]]:
-    qa_map, chunk_text, qa_questions = load_dataset(rag_path)
+    qa_map, chunk_text, chunk_url, qa_questions = load_dataset(rag_path)
     keyword_df, total_chunks = build_keyword_df(chunk_text)
+    semantic_index = None
+    if semantic_fallback:
+        semantic_index = build_semantic_index(chunk_text, model_name=semantic_model)
     blocks = parse_evaluation_blocks(eval_txt_path.read_text(encoding="utf-8").splitlines())
     records, stats = build_jsonl_records(
         blocks,
@@ -554,7 +756,16 @@ def build_evaluation_dataset(
         qa_questions,
         fuzzy_ratio=fuzzy_ratio,
         lexical_min_hits=lexical_min_hits,
+        max_chunk_ids=max_chunk_ids,
+        semantic_index=semantic_index,
+        semantic_min_score=semantic_min_score,
         excerpt_max=excerpt_max,
+    )
+    records = rebalance_url_share(records, chunk_url, max_url_share=max_gt_url_share)
+    records = rebalance_multi_gt_share(
+        records,
+        target_multi_gt_share=target_multi_gt_share,
+        keep_max_ids_for_multi=keep_max_ids_for_multi,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as output:
@@ -570,8 +781,15 @@ def main() -> None:
     parser.add_argument("--rag", type=Path, default=Path("data/rag_dataset.jsonl"))
     parser.add_argument("--eval", type=Path, default=Path("data/evaluation.txt"))
     parser.add_argument("--out", type=Path, default=Path("data/evaluation_with_evidence.jsonl"))
-    parser.add_argument("--fuzzy-ratio", type=float, default=0.82)
+    parser.add_argument("--fuzzy-ratio", type=float, default=0.86)
     parser.add_argument("--lexical-min-hits", type=int, default=2)
+    parser.add_argument("--max-chunk-ids", type=int, default=2)
+    parser.add_argument("--no-semantic-fallback", action="store_true")
+    parser.add_argument("--semantic-model", default="intfloat/e5-small-v2")
+    parser.add_argument("--semantic-min-score", type=float, default=0.56)
+    parser.add_argument("--max-gt-url-share", type=float, default=0.25)
+    parser.add_argument("--target-multi-gt-share", type=float, default=0.4)
+    parser.add_argument("--keep-max-ids-for-multi", type=int, default=1)
     parser.add_argument("--excerpt-max", type=int, default=320)
     args = parser.parse_args()
 
@@ -581,6 +799,13 @@ def main() -> None:
         out_path=args.out,
         fuzzy_ratio=args.fuzzy_ratio,
         lexical_min_hits=args.lexical_min_hits,
+        max_chunk_ids=args.max_chunk_ids,
+        semantic_fallback=not args.no_semantic_fallback,
+        semantic_model=args.semantic_model,
+        semantic_min_score=args.semantic_min_score,
+        max_gt_url_share=args.max_gt_url_share,
+        target_multi_gt_share=args.target_multi_gt_share,
+        keep_max_ids_for_multi=args.keep_max_ids_for_multi,
         excerpt_max=args.excerpt_max,
     )
     print(f"Wrote {args.out} ({count} records).")

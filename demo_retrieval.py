@@ -20,9 +20,10 @@ from ingestion.loaders import (
 from retrieval.bm25 import BM25Document, BM25Index
 from retrieval.hybrid import hybrid_search
 from retrieval.semantic import search_semantic
+from utils.embedding_format import format_query_for_embedding
 
-# Same model as embeddings/embedder.py (E5 expects query:/passage: prefixes).
-DEFAULT_MODEL = "intfloat/e5-small-v2"
+# Same model as embeddings/embedder.py.
+DEFAULT_MODEL = "intfloat/e5-base-v2"
 
 
 def run_demo(
@@ -33,7 +34,7 @@ def run_demo(
     faiss_path: str,
     index_name: str,
     rerank: bool = False,
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    reranker_model: str = "BAAI/bge-reranker-large",
     rerank_candidates: int = 20,
 ) -> None:
     dataset_docs = load_bm25_documents_from_dataset(dataset_path=dataset_path)
@@ -52,7 +53,7 @@ def run_demo(
 
     model = SentenceTransformer(model_name)
     query_vec = model.encode(
-        [f"query: {query}"],
+        [format_query_for_embedding(query, model_name)],
         normalize_embeddings=True,
         show_progress_bar=False,
     )[0].tolist()
@@ -99,7 +100,7 @@ def run_demo(
             if hasattr(r, "semantic_score"):
                 print(
                     f"  id={r.doc_id}  score={r.score:.4f}  "
-                    f"sem={r.semantic_score:.4f}  bm25_norm={r.bm25_score:.4f}"
+                    f"sem={r.semantic_score:.4f}  bm25_raw={r.bm25_score:.4f}"
                 )
             else:
                 print(f"  id={r.doc_id}  score={r.score:.4f}")
@@ -107,7 +108,7 @@ def run_demo(
 
     print_block("BM25 (lexical)", bm25_results[:top_k])
     print_block("Semantic (cosine)", semantic_results[:top_k])
-    print_block("Hybrid (0.7 * semantic + 0.3 * bm25_norm)", hybrid_results[:top_k])
+    print_block("Hybrid (RRF fusion: alpha * semantic_rrf + (1-alpha) * bm25_rrf)", hybrid_results[:top_k])
     if rerank:
         print_block("Cross-encoder reranked (over hybrid candidates)", reranked_results)
 
@@ -124,7 +125,7 @@ def main() -> None:
         "--top-k",
         "-k",
         type=int,
-        default=4,
+        default=10,
         help="Number of hits to show per method.",
     )
     parser.add_argument(

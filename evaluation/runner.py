@@ -14,6 +14,7 @@ from ingestion.loaders import load_bm25_documents_from_dataset, load_semantic_do
 from retrieval.bm25 import BM25Document, BM25Index
 from retrieval.hybrid import hybrid_search
 from retrieval.semantic import SemanticDocument, search_semantic
+from utils.embedding_format import format_query_for_embedding
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-small-v2"
 
@@ -34,10 +35,11 @@ class SemanticRetriever:
     def __init__(self, documents: list[SemanticDocument], embedding_model: str) -> None:
         self.documents = documents
         self.embedder = SentenceTransformer(embedding_model)
+        self.embedding_model = embedding_model
 
     def search(self, query: str, top_k: int) -> list[str]:
         query_embedding = self.embedder.encode(
-            [f"query: {query}"],
+            [format_query_for_embedding(query, self.embedding_model)],
             normalize_embeddings=True,
             show_progress_bar=False,
         )[0].tolist()
@@ -55,20 +57,39 @@ class BM25Retriever:
 
 
 class HybridRetriever:
-    def __init__(self, semantic: SemanticRetriever, bm25: BM25Retriever, alpha: float = 0.7) -> None:
+    def __init__(
+        self,
+        semantic: SemanticRetriever,
+        bm25: BM25Retriever,
+        alpha: float = 0.7,
+        candidate_multiplier: int = 2,
+        max_per_group: int = 1,
+        rrf_k: float = 60.0,
+    ) -> None:
         self.semantic = semantic
         self.bm25 = bm25
         self.alpha = alpha
+        self.candidate_multiplier = max(1, candidate_multiplier)
+        self.max_per_group = max_per_group
+        self.rrf_k = rrf_k
 
     def search(self, query: str, top_k: int) -> list[str]:
         query_embedding = self.semantic.embedder.encode(
-            [f"query: {query}"],
+            [format_query_for_embedding(query, self.semantic.embedding_model)],
             normalize_embeddings=True,
             show_progress_bar=False,
         )[0].tolist()
-        semantic_hits = search_semantic(query_embedding, self.semantic.documents, top_k=max(top_k * 2, 10))
-        bm25_hits = self.bm25.index.search(query, top_k=max(top_k * 2, 10))
-        merged = hybrid_search(semantic_hits, bm25_hits, alpha=self.alpha, top_k=top_k)
+        branch_k = max(top_k * self.candidate_multiplier, 10)
+        semantic_hits = search_semantic(query_embedding, self.semantic.documents, top_k=branch_k)
+        bm25_hits = self.bm25.index.search(query, top_k=branch_k)
+        merged = hybrid_search(
+            semantic_hits,
+            bm25_hits,
+            alpha=self.alpha,
+            top_k=top_k,
+            max_per_group=self.max_per_group,
+            rrf_k=self.rrf_k,
+        )
         return [item.doc_id for item in merged]
 
 
@@ -80,6 +101,9 @@ def build_retriever(
     index_name: str,
     embedding_model: str,
     alpha: float,
+    hybrid_candidate_multiplier: int = 2,
+    hybrid_max_per_group: int = 1,
+    hybrid_rrf_k: float = 60.0,
 ) -> Retriever:
     if mode == "semantic":
         docs = load_semantic_documents_from_faiss(persist_directory=faiss_path, index_name=index_name)
@@ -103,7 +127,14 @@ def build_retriever(
         if not semantic_docs:
             raise ValueError(f"No semantic docs in FAISS index '{index_name}' at '{faiss_path}'.")
         semantic = SemanticRetriever(semantic_docs, embedding_model=embedding_model)
-        return HybridRetriever(semantic=semantic, bm25=BM25Retriever(index=bm25_index), alpha=alpha)
+        return HybridRetriever(
+            semantic=semantic,
+            bm25=BM25Retriever(index=bm25_index),
+            alpha=alpha,
+            candidate_multiplier=hybrid_candidate_multiplier,
+            max_per_group=hybrid_max_per_group,
+            rrf_k=hybrid_rrf_k,
+        )
     raise ValueError(f"Unsupported retriever mode: {mode}")
 
 
@@ -154,12 +185,26 @@ def main() -> None:
     parser.add_argument("--rerank", action="store_true", help="Apply cross-encoder reranking.")
     parser.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     parser.add_argument("--rerank-candidates", type=int, default=20)
+    parser.add_argument(
+        "--require-evidence",
+        action="store_true",
+        help="Evaluate only samples with non-empty expected_evidence.chunk_ids.",
+    )
     parser.add_argument("--out-json", default=None, help="Optional path to save JSON report.")
     args = parser.parse_args()
 
     samples = load_eval_samples(Path(args.dataset))
     if not samples:
         raise ValueError(f"No samples found in dataset: {args.dataset}")
+    total_samples_before_filter = len(samples)
+    if args.require_evidence:
+        samples = [sample for sample in samples if sample.relevant_docs]
+    filtered_out_samples = total_samples_before_filter - len(samples)
+    if not samples:
+        raise ValueError(
+            "No samples left after filtering. "
+            "Try running without --require-evidence or regenerate dataset with more evidence links."
+        )
 
     k_values = parse_k_values(args.k_values)
     max_k = max(k_values)
@@ -217,8 +262,11 @@ def main() -> None:
         "retriever": args.retriever,
         "rerank_enabled": args.rerank,
         "reranker_model": args.reranker_model if args.rerank else None,
+        "require_evidence": args.require_evidence,
         "k_values": k_values,
         "samples_total": len(samples),
+        "samples_total_before_filter": total_samples_before_filter,
+        "samples_filtered_out": filtered_out_samples,
         "samples_with_ground_truth": sum(1 for s in samples if s.relevant_docs),
         "metrics": metrics,
         "runs": [asdict(run) for run in query_runs],
@@ -228,6 +276,8 @@ def main() -> None:
     print(f"- dataset: {args.dataset}")
     print(f"- retriever: {args.retriever}")
     print(f"- samples: {len(samples)}")
+    if args.require_evidence:
+        print(f"- require_evidence: true (filtered_out={filtered_out_samples})")
     for key in sorted(metrics):
         print(f"- {key}: {metrics[key]:.4f}")
 

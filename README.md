@@ -57,6 +57,20 @@ Optional chunk config:
 python main.py build_parser --min-tokens 300 --max-tokens 800 --overlap-ratio 0.15
 ```
 
+Balanced dataset config (recommended to reduce source/topic skew):
+
+```bash
+python main.py build_parser \
+  --output data/rag_dataset.jsonl \
+  --min-tokens 150 \
+  --max-tokens 300 \
+  --overlap-ratio 0.25 \
+  --min-output-chunk-tokens 120 \
+  --max-output-chunk-tokens 650 \
+  --max-chunks-per-url 12 \
+  --max-chunks-per-category 45
+```
+
 ### 2) Build embeddings + FAISS
 
 ```bash
@@ -77,8 +91,22 @@ python main.py demo_retrieval --query "what is rag" --top-k 5 --rerank --reranke
 
 ### 4) Retrieval evaluation
 
+Generate evaluation dataset with evidence links:
+
+```bash
+python evaluation/dataset.py --rag data/rag_dataset.jsonl --eval data/evaluation.txt --out data/evaluation_with_evidence.jsonl --fuzzy-ratio 0.78 --lexical-min-hits 1 --max-chunk-ids 3
+```
+
+Then run retrieval benchmark:
+
 ```bash
 python main.py evaluation_runner --dataset data/evaluation_with_evidence.jsonl --retriever hybrid --k-values 1,3,5 --out-json data/retrieval_report.json
+```
+
+Evaluate only questions that have non-empty `chunk_ids`:
+
+```bash
+python main.py evaluation_runner --dataset data/evaluation_with_evidence.jsonl --retriever hybrid --k-values 1,3,5 --require-evidence --out-json data/retrieval_report.json
 ```
 
 With cross-encoder reranking:

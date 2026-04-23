@@ -51,22 +51,46 @@ class CrossEncoderReranker:
         query: str,
         candidates: list[RerankCandidate],
         top_k: int = 5,
+        batch_size: int = 32,
+        alpha: float = 0.75,
     ) -> list[RerankedResult]:
+        def normalize(scores: list[float]) -> list[float]:
+            min_s, max_s = min(scores), max(scores)
+            if max_s - min_s < 1e-6:
+                return [0.5] * len(scores)
+            return [(s - min_s) / (max_s - min_s) for s in scores]
+
         if not candidates or top_k <= 0:
             return []
 
-        pairs = [(query, candidate.text) for candidate in candidates]
-        scores = self.model.predict(pairs)
+        filtered_candidates = [candidate for candidate in candidates if candidate.text.strip()]
+        pairs = [(query, candidate.text) for candidate in filtered_candidates]
+        scores = self.model.predict(pairs, batch_size=batch_size)
 
-        reranked = [
-            RerankedResult(
-                doc_id=candidate.doc_id,
-                text=candidate.text,
-                score=float(score),
-                base_score=float(candidate.score),
-                metadata=candidate.metadata,
+        ce_scores = [float(score) for score in scores]
+        base_scores = [float(candidate.score) for candidate in filtered_candidates]
+        ce_norm = normalize(ce_scores)
+        base_norm = normalize(base_scores)
+
+        reranked = []
+        for candidate, ce_score, base_score, ce_score_norm, base_score_norm in zip(
+            filtered_candidates,
+            ce_scores,
+            base_scores,
+            ce_norm,
+            base_norm,
+        ):
+            combined = (alpha * ce_score_norm) + ((1.0 - alpha) * base_score_norm)
+
+            reranked.append(
+                RerankedResult(
+                    doc_id=candidate.doc_id,
+                    text=candidate.text,
+                    score=combined,
+                    base_score=base_score,
+                    metadata=dict(candidate.metadata),
+                )
             )
-            for candidate, score in zip(candidates, scores)
-        ]
-        reranked.sort(key=lambda item: item.score, reverse=True)
+
+        reranked.sort(key=lambda x: x.score, reverse=True)
         return reranked[:top_k]

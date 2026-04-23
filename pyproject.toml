@@ -3,7 +3,7 @@ name = "rag-agent-parser"
 version = "0.1.0"
 description = "RAG data parsing pipeline for scraping, chunking, and JSONL export."
 authors = ["astarovo <astarovo@example.com>"]
-readme = "parser/README.md"
+readme = "README.md"
 packages = [{ include = "parser" }, { include = "embeddings" }, { include = "retrieval" }, { include = "generation" }, { include = "utils" }]
 
 [tool.poetry.dependencies]

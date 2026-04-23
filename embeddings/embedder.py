@@ -7,6 +7,7 @@ from typing import Any
 from sentence_transformers import SentenceTransformer
 
 from embeddings.faiss_store import save_faiss_index
+from utils.embedding_format import format_passage_for_embedding
 
 
 def prepare_embedding_input(
@@ -58,8 +59,7 @@ def generate_embeddings(
             texts.append(item["text"])
             metadatas.append(item.get("metadata", {}))
 
-    # E5 models expect task prefixes; use "passage:" for chunk documents.
-    model_inputs = [f"passage: {text}" for text in texts]
+    model_inputs = [format_passage_for_embedding(text, model_name) for text in texts]
     vectors = model.encode(
         model_inputs,
         batch_size=batch_size,

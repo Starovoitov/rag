@@ -10,6 +10,7 @@ from generation.llm import LLMConfig, call_llm, stream_llm
 from generation.prompt import SourceChunk, build_rag_messages
 from ingestion.loaders import load_semantic_documents_from_faiss
 from retrieval.semantic import search_semantic
+from utils.embedding_format import format_query_for_embedding
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-small-v2"
 
@@ -92,7 +93,7 @@ def run_rag(
 
     embedder = SentenceTransformer(embedding_model)
     query_embedding = embedder.encode(
-        [f"query: {question}"],
+        [format_query_for_embedding(question, embedding_model)],
         normalize_embeddings=True,
         show_progress_bar=False,
     )[0].tolist()
