@@ -83,24 +83,22 @@ flowchart TD
 
 ## 1) BM25
 
-For term \( t \) and document \( d \):
+For term $t$ and document $d$:
 
-\[
+$$
 \text{IDF}(t) = \log\left(1 + \frac{N - df_t + 0.5}{df_t + 0.5}\right)
-\]
 
-\[
 \text{BM25}(q,d) = \sum_{t \in q} \text{IDF}(t)\cdot
 \frac{tf_{t,d}(k_1+1)}{tf_{t,d}+k_1\left(1-b+b\frac{|d|}{avgdl}\right)}
-\]
+$$
 
-Defaults: \(k_1=1.5,\; b=0.75\).
+Defaults: $k_1=1.5,\; b=0.75$.
 
 ## 2) Semantic similarity (cosine)
 
-\[
+$$
 \cos(\mathbf{q}, \mathbf{d}) = \frac{\mathbf{q}\cdot\mathbf{d}}{\|\mathbf{q}\|\|\mathbf{d}\|}
-\]
+$$
 
 Embeddings are normalized; FAISS uses inner product, so IP ~= cosine.
 
@@ -108,45 +106,45 @@ Embeddings are normalized; FAISS uses inner product, so IP ~= cosine.
 
 Per branch rank contribution:
 
-\[
+$$
 \text{RRF}(r)=\frac{1}{k_{rrf}+r}
-\]
+$$
 
 Combined hybrid score:
 
-\[
+$$
 S_{\text{hybrid}}(d)=\alpha\cdot\text{RRF}_{\text{semantic}}(d) + (1-\alpha)\cdot\text{RRF}_{\text{bm25}}(d)
-\]
+$$
 
 ## 4) Multi-query RRF
 
-If query variants produce ranks \(r_i(d)\):
+If query variants produce ranks $r_i(d)$:
 
-\[
+$$
 S(d)=\sum_i \frac{1}{k_{rrf}+r_i(d)}
-\]
+$$
 
 ## 5) MMR (diversification before rerank)
 
-\[
+$$
 \underset{d \in C \setminus S}{\arg\max}
 \left[
 \lambda\cdot\text{Rel}(q,d) - (1-\lambda)\cdot\max_{s \in S}\text{Sim}(d,s)
 \right]
-\]
+$$
 
 ## 6) Cross-encoder fusion
 
 After CE calibration and base-score normalization:
 
-\[
+$$
 S_{\text{final}}(d)=\alpha_{ce}\cdot CE_{\text{norm}}(d)+(1-\alpha_{ce})\cdot Base_{\text{norm}}(d)
-\]
+$$
 
 Calibration options:
 - `minmax`
-- `softmax` with temperature \(T\): \( \text{softmax}(z/T) \)
-- `zscore` + sigmoid: \( \sigma((z-\mu)/(\sigma T)) \)
+- `softmax` with temperature $T$: $\text{softmax}(z/T)$
+- `zscore` + sigmoid: $\sigma((z-\mu)/(\sigma T))$
 
 ---
 
@@ -154,38 +152,13 @@ Calibration options:
 
 For a query with `TopK` and `Relevant`:
 
-- Recall@k:
-\[
-\frac{|TopK \cap Relevant|}{|Relevant|}
-\]
-
-- Precision@k:
-\[
-\frac{|TopK \cap Relevant|}{k}
-\]
-
-- HitRate@k:
-\[
-\mathbb{1}[TopK \cap Relevant \neq \emptyset]
-\]
-
-- Reciprocal Rank:
-\[
-RR = \frac{1}{\text{rank of first relevant}}
-\]
-
+- Recall@k: $$\frac{|TopK \cap Relevant|}{|Relevant|}$$
+- Precision@k: $$\frac{|TopK \cap Relevant|}{k}$$
+- HitRate@k: $$\mathbb{1}[TopK \cap Relevant \neq \emptyset]$$
+- Reciprocal Rank: $$RR = \frac{1}{\text{rank of first relevant}}$$
 - MRR: average of RR across queries.
-
-- DCG@k:
-\[
-\sum_{i=1}^{k}\frac{2^{rel_i}-1}{\log_2(i+1)}
-\]
-
-- NDCG@k:
-\[
-\frac{DCG@k}{IDCG@k}
-\]
-
+- DCG@k: $$\sum_{i=1}^{k}\frac{2^{rel_i}-1}{\log_2(i+1)}$$
+- NDCG@k: $$\frac{DCG@k}{IDCG@k}$$
 ---
 
 ## Advanced Features
