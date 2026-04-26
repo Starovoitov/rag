@@ -1,0 +1,28 @@
+{
+  "providers": {
+    "openai": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "api_base": "https://api.openai.com/v1/chat/completions",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "gigachat": {
+      "provider": "gigachat",
+      "model": "GigaChat-Pro",
+      "api_base": "https://api.gigachat.ru/v1/chat/completions",
+      "api_key_env": "GIGACHAT_API_KEY"
+    },
+    "ollama": {
+      "provider": "openai",
+      "model": "Lexi-Llama-3-8B-Uncensored_Q4_K_M",
+      "api_base": "http://127.0.0.1:1337/v1/chat/completions",
+      "api_key_env": "OLLAMA_API_KEY"
+    },
+    "qwen": {
+      "provider": "openai",
+      "model": "qwen-plus",
+      "api_base": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "api_key_env": "QWEN_API_KEY"
+    }
+  }
+}

@@ -7,6 +7,7 @@ from typing import Any
 
 from sentence_transformers import SentenceTransformer
 
+from generation.config import DEFAULT_LLM_CONFIG_PATH
 from generation.llm import call_llm
 from generation.prompt import SourceChunk, build_rag_messages
 from generation.run_rag import build_model_configs
@@ -41,6 +42,7 @@ def run_experiments(
     index_name: str,
     embedding_model: str,
     log_path: str,
+    llm_config_path: str = DEFAULT_LLM_CONFIG_PATH,
 ) -> None:
     logger = get_json_logger("experiments.run", log_path)
     semantic_docs = load_semantic_documents_from_faiss(
@@ -69,7 +71,7 @@ def run_experiments(
         max_context_tokens=max_context_tokens,
     )
 
-    configs = build_model_configs()
+    configs = build_model_configs(config_path=llm_config_path)
     for model_key in models:
         conf = configs.get(model_key)
         if conf is None:
@@ -132,6 +134,7 @@ def main() -> None:
     parser.add_argument("--index", default="rag_chunks", help="FAISS index name.")
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--log-path", default="experiments/logs/llm_experiment_results.jsonl")
+    parser.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
 
     args = parser.parse_args()
     models = [x.strip() for x in args.models.split(",") if x.strip()]
@@ -144,5 +147,6 @@ def main() -> None:
         index_name=args.index,
         embedding_model=args.embedding_model,
         log_path=args.log_path,
+        llm_config_path=args.llm_config_path,
     )
 

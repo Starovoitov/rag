@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import os
 
 from sentence_transformers import SentenceTransformer
 
+from generation.config import DEFAULT_LLM_CONFIG_PATH, load_llm_provider_configs
 from generation.llm import LLMConfig, call_llm, stream_llm
 from generation.prompt import SourceChunk, build_rag_messages
 from ingestion.loaders import load_semantic_documents_from_faiss
@@ -14,9 +14,6 @@ from utils.embedding_format import format_query_for_embedding
 from utils.logger import configure_runtime_logger
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-base-v2"
-
-KNOWN_LLM_PROVIDERS: tuple[str, ...] = ("openai", "gigachat", "ollama", "qwen")
-
 
 def _guess_embedding_models_by_dim(dim: int) -> str:
     known_dims = {
@@ -27,50 +24,21 @@ def _guess_embedding_models_by_dim(dim: int) -> str:
     return known_dims.get(dim, "unknown")
 
 
-def get_llm_config(provider: str, model: str | None = None) -> LLMConfig:
-    """
-    Single source of truth for OpenAI-compatible LLM endpoints (incl. GigaChat, Ollama gateway, Qwen).
-
-    `model` overrides the env default for that provider when set.
-    """
-    key = provider.lower()
-    if key == "openai":
-        return LLMConfig(
-            provider="openai",
-            model=model or os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            api_base=os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1/chat/completions"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-        )
-    if key == "gigachat":
-        return LLMConfig(
-            provider="gigachat",
-            model=model or os.getenv("GIGACHAT_MODEL", "GigaChat-Pro"),
-            api_base=os.getenv("GIGACHAT_API_BASE", "https://api.gigachat.ru/v1/chat/completions"),
-            api_key=os.getenv("GIGACHAT_API_KEY"),
-        )
-    if key == "ollama":
-        return LLMConfig(
-            provider="openai",
-            model=model or "Lexi-Llama-3-8B-Uncensored_Q4_K_M",
-            api_base=os.getenv("OLLAMA_API_BASE", "http://127.0.0.1:1337/v1/chat/completions"),
-            api_key=f"{os.getenv("OLLAMA_API_KEY")}",
-        )
-    if key == "qwen":
-        return LLMConfig(
-            provider="openai",
-            model=model or os.getenv("QWEN_MODEL", "qwen-plus"),
-            api_base=os.getenv(
-                "QWEN_API_BASE",
-                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
-            ),
-            api_key=f"{os.getenv("QWEN_API_KEY")}",
-        )
-    raise ValueError(f"Unsupported provider: {provider}")
+def get_llm_config(provider: str, model: str | None = None, *, config_path: str = DEFAULT_LLM_CONFIG_PATH) -> LLMConfig:
+    """Load provider defaults from config and optionally override model."""
+    configs = load_llm_provider_configs(config_path=config_path)
+    key = provider.lower().strip()
+    if key not in configs:
+        raise ValueError(f"Unsupported provider: {provider}")
+    config = configs[key]
+    if model:
+        config.model = model
+    return config
 
 
-def build_model_configs() -> dict[str, LLMConfig]:
-    """Named provider configs for multi-model experiments (env-driven defaults)."""
-    return {name: get_llm_config(name) for name in KNOWN_LLM_PROVIDERS}
+def build_model_configs(config_path: str = DEFAULT_LLM_CONFIG_PATH) -> dict[str, LLMConfig]:
+    """Named provider configs loaded from root config."""
+    return load_llm_provider_configs(config_path=config_path)
 
 
 
@@ -96,6 +64,7 @@ def run_rag(
     log_level: str = "INFO",
     log_path: str | None = None,
     log_json: bool = False,
+    llm_config_path: str = DEFAULT_LLM_CONFIG_PATH,
 ) -> None:
     logger = configure_runtime_logger(
         "rag.run_rag",
@@ -184,7 +153,7 @@ def run_rag(
             logger.warning("prompt built with zero chunks")
         logger.info("prompt built: used_chunks=%s", len(prompt_data["used_chunks"]))
 
-        conf = get_llm_config(provider=provider, model=model)
+        conf = get_llm_config(provider=provider, model=model, config_path=llm_config_path)
         conf.max_tokens = max_tokens
         conf.temperature = temperature
         conf.top_p = top_p
@@ -233,10 +202,11 @@ def run_rag(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a single RAG query against one LLM provider.")
     parser.add_argument("--question", "-q", required=True, help="Question to ask.")
+    known_providers = tuple(load_llm_provider_configs().keys())
     parser.add_argument(
         "--provider",
-        default="openai",
-        choices=KNOWN_LLM_PROVIDERS,
+        default=known_providers[0],
+        choices=known_providers,
         help="LLM provider config to use.",
     )
     parser.add_argument("--model", default=None, help="Override provider default model.")
@@ -258,6 +228,7 @@ def main() -> None:
     parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
     parser.add_argument("--log-path", default=None, help="Optional runtime log file path.")
     parser.add_argument("--log-json", action="store_true", help="Emit runtime logs in JSON format.")
+    parser.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
     args = parser.parse_args()
 
     run_rag(
@@ -282,5 +253,6 @@ def main() -> None:
         log_level=args.log_level,
         log_path=args.log_path,
         log_json=args.log_json,
+        llm_config_path=args.llm_config_path,
     )
 

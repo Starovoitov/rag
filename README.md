@@ -76,12 +76,24 @@ Sources (URLs / GitHub / docs / community pages)
 - `experiments/` - run outputs for analysis (e.g. `experiments/results/retrieval_report_best.json`, `experiments/logs/*.jsonl`)
 - `caching/` - reusable cache implementations (currently in-memory LRU + TTL)
 
+## Root configs
+
+- `sources.config.json` - parser source registry (maps to `SourceSpec` entries)
+- `llm.config.json` - named LLM provider defaults (maps to `LLMConfig` base fields)
+- Config type suggestion: keep both as JSON objects (typed + validated at runtime) for easy CLI overrides and versioning.
+
 ## Common workflows
 
 ### 1) Build parser dataset
 
 ```bash
 python main.py build_parser --output data/rag_dataset.jsonl
+```
+
+Use custom source config:
+
+```bash
+python main.py build_parser --sources-config sources.config.json
 ```
 
 Optional chunk config:
@@ -176,6 +188,12 @@ python main.py evaluation_runner --dataset data/evaluation_with_evidence.jsonl -
 python main.py run_rag --question "What is RAG?" --provider openai
 ```
 
+Use custom LLM provider config:
+
+```bash
+python main.py run_rag --question "What is RAG?" --provider openai --llm-config-path llm.config.json
+```
+
 With cross-encoder reranking:
 
 ```bash
@@ -211,6 +229,12 @@ Run full pipeline with in-loop reranker training:
 
 ```bash
 python main.py reranker_pipeline --train-reranker
+```
+
+With custom LLM config for multi-query expansion:
+
+```bash
+python main.py reranker_pipeline --multi-query-llm-expansion --llm-config-path llm.config.json
 ```
 
 Run with retrieval + LLM caches enabled:

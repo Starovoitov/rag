@@ -11,7 +11,7 @@ from parser.models import RawChunkRecord
 from parser.normalize import normalize_text
 from parser.qa import build_qa_pairs
 from parser.scraper import scrape_source
-from parser.sources import build_sources
+from parser.sources import DEFAULT_SOURCES_CONFIG_PATH, build_sources
 from utils.logger import configure_runtime_logger
 
 
@@ -26,6 +26,7 @@ def run_pipeline(
     max_chunks_per_category: int = 45,
     chunker_mode: str = "token",
     near_duplicate_jaccard: float = 0.0,
+    sources_config: str = DEFAULT_SOURCES_CONFIG_PATH,
     log_level: str = "INFO",
     log_path: str | None = None,
     log_json: bool = False,
@@ -50,7 +51,7 @@ def run_pipeline(
         "skipped_by_category_cap": 0,
         "skipped_by_near_duplicate": 0,
     }
-    sources = build_sources()
+    sources = build_sources(config_path=sources_config)
     total_sources = len(sources)
     chunks_per_url: dict[str, int] = {}
     chunks_per_category: dict[str, int] = {}

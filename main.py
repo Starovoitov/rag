@@ -9,6 +9,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING
+from parser.sources import DEFAULT_SOURCES_CONFIG_PATH
 from utils.common import min_max_normalize, rank_weight, tokenize
 from utils.logger import configure_runtime_logger
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-base-v2"
+DEFAULT_LLM_CONFIG_PATH = "llm.config.json"
 
 
 def _dedupe_query_variants(variants: list[str]) -> list[str]:
@@ -126,6 +128,7 @@ def _llm_structured_query_expansion(
     api_key: str | None,
     timeout_seconds: int,
     retries: int,
+    llm_config_path: str,
     cache_enabled: bool = False,
     cache_capacity: int = 512,
     cache_ttl_seconds: float = 300.0,
@@ -134,7 +137,7 @@ def _llm_structured_query_expansion(
     from generation.llm import call_llm
     from generation.run_rag import get_llm_config
 
-    conf = get_llm_config(provider=provider, model=model or None)
+    conf = get_llm_config(provider=provider, model=model or None, config_path=llm_config_path)
     if api_base:
         conf.api_base = api_base
     if api_key:
@@ -176,6 +179,7 @@ def _llm_structured_query_expansion_batch(
     api_key: str | None,
     timeout_seconds: int,
     retries: int,
+    llm_config_path: str,
     cache_enabled: bool = False,
     cache_capacity: int = 512,
     cache_ttl_seconds: float = 300.0,
@@ -188,7 +192,7 @@ def _llm_structured_query_expansion_batch(
     if not unique_queries:
         return {}
 
-    conf = get_llm_config(provider=provider, model=model or None)
+    conf = get_llm_config(provider=provider, model=model or None, config_path=llm_config_path)
     if api_base:
         conf.api_base = api_base
     if api_key:
@@ -248,6 +252,7 @@ def _build_query_variants(
     llm_api_key: str | None = None,
     llm_timeout_seconds: int = 8,
     llm_retries: int = 0,
+    llm_config_path: str = DEFAULT_LLM_CONFIG_PATH,
     llm_cache_enabled: bool = False,
     llm_cache_capacity: int = 512,
     llm_cache_ttl_seconds: float = 300.0,
@@ -263,6 +268,7 @@ def _build_query_variants(
         llm_api_key=llm_api_key,
         llm_timeout_seconds=llm_timeout_seconds,
         llm_retries=llm_retries,
+        llm_config_path=llm_config_path,
         llm_cache_enabled=llm_cache_enabled,
         llm_cache_capacity=llm_cache_capacity,
         llm_cache_ttl_seconds=llm_cache_ttl_seconds,
@@ -282,6 +288,7 @@ def _build_query_variants_with_debug(
     llm_api_key: str | None = None,
     llm_timeout_seconds: int = 8,
     llm_retries: int = 0,
+    llm_config_path: str = DEFAULT_LLM_CONFIG_PATH,
     llm_cache_enabled: bool = False,
     llm_cache_capacity: int = 512,
     llm_cache_ttl_seconds: float = 300.0,
@@ -315,6 +322,7 @@ def _build_query_variants_with_debug(
                 api_key=llm_api_key,
                 timeout_seconds=llm_timeout_seconds,
                 retries=llm_retries,
+                llm_config_path=llm_config_path,
                 cache_enabled=llm_cache_enabled,
                 cache_capacity=llm_cache_capacity,
                 cache_ttl_seconds=llm_cache_ttl_seconds,
@@ -883,11 +891,13 @@ def cmd_build_parser(args: argparse.Namespace) -> None:
         max_output_chunk_tokens=args.max_output_chunk_tokens,
         max_chunks_per_url=args.max_chunks_per_url,
         max_chunks_per_category=args.max_chunks_per_category,
+        sources_config=args.sources_config,
         chunker_mode=args.chunker_mode,
         near_duplicate_jaccard=args.near_duplicate_jaccard,
         log_level=args.log_level,
         log_path=args.log_path,
         log_json=args.log_json,
+        llm_config_path=args.llm_config_path,
     )
     stats["embedding_model"] = args.embedding_model
     print(json.dumps(stats, indent=2))
@@ -1007,6 +1017,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             api_key=args.multi_query_llm_api_key,
             timeout_seconds=args.multi_query_llm_timeout_seconds,
             retries=args.multi_query_llm_retries,
+            llm_config_path=args.llm_config_path,
             cache_enabled=args.llm_cache_enabled,
             cache_capacity=args.llm_cache_capacity,
             cache_ttl_seconds=args.llm_cache_ttl_seconds,
@@ -1061,6 +1072,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 llm_api_key=args.multi_query_llm_api_key,
                 llm_timeout_seconds=args.multi_query_llm_timeout_seconds,
                 llm_retries=args.multi_query_llm_retries,
+                llm_config_path=args.llm_config_path,
                 llm_cache_enabled=args.llm_cache_enabled,
                 llm_cache_capacity=args.llm_cache_capacity,
                 llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
@@ -1452,6 +1464,7 @@ def cmd_reranker_pipeline(args: argparse.Namespace) -> None:
         multi_query_llm_timeout_seconds=args.multi_query_llm_timeout_seconds,
         multi_query_llm_retries=args.multi_query_llm_retries,
         multi_query_llm_debug=args.multi_query_llm_debug,
+        llm_config_path=args.llm_config_path,
         retrieval_cache_enabled=args.retrieval_cache_enabled,
         retrieval_cache_capacity=args.retrieval_cache_capacity,
         retrieval_cache_ttl_seconds=args.retrieval_cache_ttl_seconds,
@@ -1615,6 +1628,7 @@ def cmd_run_experiments(args: argparse.Namespace) -> None:
         index_name=args.index,
         embedding_model=args.embedding_model,
         log_path=args.log_path,
+        llm_config_path=args.llm_config_path,
     )
 
 
@@ -1635,6 +1649,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser_cmd.add_argument("--max-output-chunk-tokens", type=int, default=650)
     build_parser_cmd.add_argument("--max-chunks-per-url", type=int, default=12)
     build_parser_cmd.add_argument("--max-chunks-per-category", type=int, default=45)
+    build_parser_cmd.add_argument("--sources-config", default=DEFAULT_SOURCES_CONFIG_PATH)
     build_parser_cmd.add_argument("--chunker-mode", choices=("token", "semantic_dynamic"), default="token")
     build_parser_cmd.add_argument(
         "--near-duplicate-jaccard",
@@ -1745,6 +1760,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_cmd.add_argument("--multi-query-llm-api-key", default=None)
     eval_cmd.add_argument("--multi-query-llm-timeout-seconds", type=int, default=8)
     eval_cmd.add_argument("--multi-query-llm-retries", type=int, default=0)
+    eval_cmd.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
     eval_cmd.add_argument("--multi-query-llm-debug", action="store_true")
     eval_cmd.add_argument(
         "--retrieval-cache-enabled",
@@ -1858,6 +1874,7 @@ def build_parser() -> argparse.ArgumentParser:
     rerank_pipeline_cmd.add_argument("--multi-query-llm-api-key", default=None)
     rerank_pipeline_cmd.add_argument("--multi-query-llm-timeout-seconds", type=int, default=8)
     rerank_pipeline_cmd.add_argument("--multi-query-llm-retries", type=int, default=0)
+    rerank_pipeline_cmd.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
     rerank_pipeline_cmd.add_argument("--multi-query-llm-debug", action="store_true")
     rerank_pipeline_cmd.add_argument("--retrieval-cache-enabled", action="store_true")
     rerank_pipeline_cmd.add_argument("--retrieval-cache-capacity", type=int, default=10000)
@@ -1910,6 +1927,7 @@ def build_parser() -> argparse.ArgumentParser:
     rag_cmd.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
     rag_cmd.add_argument("--log-path", default="data/last_run.log", help="Optional runtime log file path.")
     rag_cmd.add_argument("--log-json", action="store_true", help="Emit runtime logs in JSON format.")
+    rag_cmd.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
     rag_cmd.set_defaults(handler=cmd_run_rag)
 
     clean_cmd = subparsers.add_parser("cleanup_faiss", help="Delete FAISS index and optionally full directory.")
@@ -1992,6 +2010,7 @@ def build_parser() -> argparse.ArgumentParser:
     experiments_cmd.add_argument("--index", default="rag_chunks")
     experiments_cmd.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     experiments_cmd.add_argument("--log-path", default="experiments/logs/llm_experiment_results.jsonl")
+    experiments_cmd.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
     experiments_cmd.set_defaults(handler=cmd_run_experiments)
 
     return parser
