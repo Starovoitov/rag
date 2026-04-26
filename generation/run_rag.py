@@ -146,6 +146,7 @@ def run_rag(
         hits = search_semantic(query_embedding, semantic_docs, top_k=candidate_k)
         logger.info("retrieval completed: hits=%s", len(hits))
         if rerank:
+            # Heavy reranker deps are loaded only when reranking is enabled.
             from reranking.cross_encoder import CrossEncoderReranker, RerankCandidate
 
             logger.info("running reranker: model=%s", reranker_model)

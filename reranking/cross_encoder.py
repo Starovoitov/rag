@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 from sentence_transformers import CrossEncoder
+from utils.common import min_max_normalize
 
 
 DEFAULT_CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -17,13 +18,6 @@ class CEScoreCalibrationMode(StrEnum):
     ZSCORE = "zscore"
 
 
-def min_nax_normalize(scores: list[float]) -> list[float]:
-    min_s, max_s = min(scores), max(scores)
-    if max_s - min_s < 1e-6:
-        return [0.5] * len(scores)
-    return [(s - min_s) / (max_s - min_s) for s in scores]
-
-
 def calibrate_ce_scores(
     scores: list[float],
     mode: CEScoreCalibrationMode,
@@ -31,7 +25,8 @@ def calibrate_ce_scores(
 ) -> list[float]:
     t = max(temperature, 1e-6)
     if mode == CEScoreCalibrationMode.MINMAX:
-        return min_nax_normalize(scores)
+        normalized = min_max_normalize({str(i): score for i, score in enumerate(scores)}, epsilon=1e-6)
+        return [normalized[str(i)] for i in range(len(scores))]
     if mode == CEScoreCalibrationMode.SOFTMAX:
         shifted = [score / t for score in scores]
         max_s = max(shifted)
@@ -117,7 +112,8 @@ class CrossEncoderReranker:
             else CEScoreCalibrationMode(ce_calibration)
         )
         ce_norm = calibrate_ce_scores(ce_scores, calibration_mode, ce_temperature)
-        base_norm = min_nax_normalize(base_scores)
+        base_norm_map = min_max_normalize({str(i): score for i, score in enumerate(base_scores)}, epsilon=1e-6)
+        base_norm = [base_norm_map[str(i)] for i in range(len(base_scores))]
 
         reranked = []
         for candidate, ce_score, base_score, ce_score_norm, base_score_norm in zip(

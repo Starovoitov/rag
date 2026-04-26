@@ -5,22 +5,7 @@ import random
 from pathlib import Path
 
 from sentence_transformers import InputExample
-
-
-def load_chunk_texts(rag_dataset_path: Path) -> dict[str, str]:
-    chunk_texts: dict[str, str] = {}
-    for line in rag_dataset_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if row.get("record_type") != "raw_chunk":
-            continue
-        chunk_id = str(row.get("chunk_id", "")).strip()
-        text = str(row.get("text", "")).strip()
-        if chunk_id and text:
-            chunk_texts[chunk_id] = text
-    return chunk_texts
-
+from ingestion.loaders import load_chunk_texts
 
 def load_pairwise_samples(
     path: Path,

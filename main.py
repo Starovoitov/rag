@@ -9,7 +9,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING
-from utils.common import tokenize
+from utils.common import min_max_normalize, rank_weight, tokenize
 from utils.logger import configure_runtime_logger
 
 if TYPE_CHECKING:
@@ -104,10 +104,7 @@ def _entity_concept_variants(base: str) -> list[str]:
 
 
 def _parse_llm_expansion_payload(raw_text: str) -> tuple[list[str], list[str], list[str]]:
-    text = raw_text.strip()
-    if text.startswith("```"):
-        lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
-        text = "\n".join(lines).strip()
+    text = _strip_markdown_code_fences(raw_text)
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
@@ -133,6 +130,7 @@ def _llm_structured_query_expansion(
     cache_capacity: int = 512,
     cache_ttl_seconds: float = 300.0,
 ) -> tuple[list[str], list[str], list[str]]:
+    # Lazy import keeps core CLI usable without LLM client deps.
     from generation.llm import call_llm
     from generation.run_rag import get_llm_config
 
@@ -182,6 +180,7 @@ def _llm_structured_query_expansion_batch(
     cache_capacity: int = 512,
     cache_ttl_seconds: float = 300.0,
 ) -> dict[str, tuple[list[str], list[str], list[str]]]:
+    # Lazy import keeps core CLI usable without LLM client deps.
     from generation.llm import call_llm
     from generation.run_rag import get_llm_config
 
@@ -221,10 +220,7 @@ def _llm_structured_query_expansion_batch(
     )
     try:
         response = call_llm(system_prompt=system_prompt, user_prompt=user_prompt, config=conf)
-        text = response.strip()
-        if text.startswith("```"):
-            lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
-            text = "\n".join(lines).strip()
+        text = _strip_markdown_code_fences(response)
         payload = json.loads(text)
     except Exception:
         return {}
@@ -531,14 +527,12 @@ def _inject_bm25_tail_candidates(
     return merged_doc_ids + rescued
 
 
-def _minmax_normalize(values: dict[str, float]) -> dict[str, float]:
-    if not values:
-        return {}
-    low = min(values.values())
-    high = max(values.values())
-    if (high - low) < 1e-9:
-        return {key: 0.5 for key in values}
-    return {key: (value - low) / (high - low) for key, value in values.items()}
+def _strip_markdown_code_fences(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
+        return "\n".join(lines).strip()
+    return text
 
 
 def _interleave_doc_ids(primary: list[str], secondary: list[str], limit: int) -> list[str]:
@@ -680,18 +674,6 @@ def _source_miss_type(
     return "both_hit"
 
 
-def _rank_weight(rank: int) -> float:
-    # Rank-aware contrastive weighting:
-    # - 1..5: highest pressure to fix top-rank confusions
-    # - 6..15: medium pressure
-    # - 16..50: lower pressure
-    if rank <= 5:
-        return 1.0
-    if rank <= 15:
-        return 0.7
-    return 0.4
-
-
 def _build_reranker_training_contexts_from_failures(
     *,
     failure_records: list[dict[str, object]],
@@ -762,7 +744,7 @@ def _build_reranker_training_contexts_from_failures(
             if negative_id in negative_weights:
                 continue
             negative_ids.append(negative_id)
-            negative_weights[negative_id] = sample_weight * _rank_weight(rank)
+            negative_weights[negative_id] = sample_weight * rank_weight(rank)
 
         # Source-miss signal is useful for hard-negative enrichment only.
         if source_miss_type in {"embedding_miss", "bm25_miss"} and len(negative_ids) < max_negatives:
@@ -774,7 +756,7 @@ def _build_reranker_training_contexts_from_failures(
                 if negative_id not in doc_text_map:
                     continue
                 negative_ids.append(negative_id)
-                negative_weights[negative_id] = sample_weight * _rank_weight(rank)
+                negative_weights[negative_id] = sample_weight * rank_weight(rank)
 
         if not positive_ids or not negative_ids:
             continue
@@ -811,6 +793,7 @@ def _train_reranker_from_contexts_jsonl(
     val_ratio: float,
     seed: int,
 ) -> dict[str, object]:
+    # Heavy training deps are imported lazily for non-training commands.
     from sentence_transformers import InputExample
     from sentence_transformers.cross_encoder import CrossEncoder
     from sentence_transformers.cross_encoder.evaluation import CEBinaryClassificationEvaluator
@@ -888,6 +871,7 @@ def _train_reranker_from_contexts_jsonl(
 
 
 def cmd_build_parser(args: argparse.Namespace) -> None:
+    # Command-scoped import avoids loading parser stack for unrelated commands.
     from parser.pipeline import run_pipeline
 
     stats = run_pipeline(
@@ -907,6 +891,7 @@ def cmd_build_parser(args: argparse.Namespace) -> None:
 
 
 def cmd_demo_retrieval(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps startup lightweight.
     from demo_retrieval import run_demo
 
     run_demo(
@@ -923,10 +908,13 @@ def cmd_demo_retrieval(args: argparse.Namespace) -> None:
 
 
 def cmd_evaluation_runner(args: argparse.Namespace) -> None:
+    # Command-scoped imports keep module import side effects localized.
     from evaluation.dataset import load_eval_samples
     from evaluation.metrics import RetrievalResult, evaluate_retrieval
     from evaluation.runner import QueryRun, build_retriever, parse_k_values
     from ingestion.loaders import load_bm25_documents_from_dataset
+    from retrieval.semantic import search_semantic
+    from utils.embedding_format import format_query_for_embedding
 
     logger = configure_runtime_logger(
         "rag.evaluation_runner",
@@ -986,11 +974,14 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
     }
     logger.info("loaded bm25 text map: count=%s", len(doc_text_map))
     reranker = None
+    rerank_candidate_cls = None
     if args.rerank:
-        from reranking.cross_encoder import CrossEncoderReranker
+        # Heavy reranker deps are loaded only when reranking is enabled.
+        from reranking.cross_encoder import CrossEncoderReranker, RerankCandidate
 
         logger.info("initializing reranker: model=%s", args.reranker_model)
         reranker = CrossEncoderReranker(model_name=args.reranker_model)
+        rerank_candidate_cls = RerankCandidate
 
     query_runs: list[QueryRun] = []
     metric_inputs: list[RetrievalResult] = []
@@ -1029,9 +1020,6 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             semantic_obj = getattr(retriever, "semantic", None)
             bm25_obj = getattr(retriever, "bm25", None)
             if semantic_obj is not None and hasattr(semantic_obj, "search") and hasattr(semantic_obj, "embedder"):
-                from retrieval.semantic import search_semantic
-                from utils.embedding_format import format_query_for_embedding
-
                 query_embedding = semantic_obj.embedder.encode(
                     [format_query_for_embedding(sample.query, semantic_obj.embedding_model)],
                     normalize_embeddings=True,
@@ -1113,12 +1101,10 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                     max_k=mmr_k,
                     diversity_threshold=diversity_threshold,
                 )
-            from reranking.cross_encoder import RerankCandidate
-
-            sem_norm = _minmax_normalize(semantic_score_map)
-            bm25_norm = _minmax_normalize(bm25_score_map)
+            sem_norm = min_max_normalize(semantic_score_map)
+            bm25_norm = min_max_normalize(bm25_score_map)
             rerank_input = [
-                RerankCandidate(
+                rerank_candidate_cls(
                     doc_id=doc_id,
                     text=doc_text_map.get(doc_id, ""),
                     score=(
@@ -1368,6 +1354,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
 
 
 def cmd_run_rag(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps retrieval-only commands lean.
     from generation.run_rag import run_rag
 
     run_rag(
@@ -1396,6 +1383,7 @@ def cmd_run_rag(args: argparse.Namespace) -> None:
 
 
 def cmd_cleanup_faiss(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps cleanup deps isolated.
     from ingestion.cleaner import cleanup_faiss_db
 
     result = cleanup_faiss_db(
@@ -1487,6 +1475,7 @@ def cmd_reranker_pipeline(args: argparse.Namespace) -> None:
 
 
 def cmd_build_evaluation_dataset(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps evaluation dataset builder optional.
     from evaluation.dataset import build_evaluation_dataset
 
     count, stats = build_evaluation_dataset(
@@ -1509,6 +1498,7 @@ def cmd_build_evaluation_dataset(args: argparse.Namespace) -> None:
 
 
 def cmd_dataset_audit(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps audit utilities optional.
     from commands.dataset_audit import audit
 
     report = audit(Path(args.rag), Path(args.eval))
@@ -1520,6 +1510,7 @@ def cmd_dataset_audit(args: argparse.Namespace) -> None:
 
 
 def cmd_build_reranker_dataset(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps reranker dataset utilities optional.
     from commands.build_reranker_dataset import build_contexts, load_chunk_texts
 
     report = json.loads(Path(args.eval_report).read_text(encoding="utf-8"))
@@ -1545,6 +1536,7 @@ def cmd_build_reranker_dataset(args: argparse.Namespace) -> None:
 
 
 def cmd_train_reranker(args: argparse.Namespace) -> None:
+    # Heavy training deps are imported lazily for non-training commands.
     from commands.train_reranker import load_chunk_texts, load_pairwise_samples
     from sentence_transformers.cross_encoder import CrossEncoder
     from sentence_transformers.cross_encoder.evaluation import CEBinaryClassificationEvaluator
@@ -1593,6 +1585,7 @@ def cmd_train_reranker(args: argparse.Namespace) -> None:
 
 
 def cmd_run_experiments(args: argparse.Namespace) -> None:
+    # Command-scoped import keeps experiment stack optional.
     from experiments.run_experiments import run_experiments
 
     models = [x.strip() for x in args.models.split(",") if x.strip()]

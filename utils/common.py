@@ -18,3 +18,25 @@ def tokenize(text: str, *, for_bm25: bool = False) -> list[str]:
     if for_bm25:
         return _BM25_WORD.findall(text.lower())
     return re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE)
+
+
+def min_max_normalize(values: dict[str, float], *, epsilon: float = 1e-9) -> dict[str, float]:
+    if not values:
+        return {}
+    low = min(values.values())
+    high = max(values.values())
+    if (high - low) < epsilon:
+        return {key: 0.5 for key in values}
+    return {key: (value - low) / (high - low) for key, value in values.items()}
+
+
+def rank_weight(rank: int) -> float:
+    # Rank-aware contrastive weighting:
+    # - 1..5: highest pressure to fix top-rank confusions
+    # - 6..15: medium pressure
+    # - 16..50: lower pressure
+    if rank <= 5:
+        return 1.0
+    if rank <= 15:
+        return 0.7
+    return 0.4

@@ -3,31 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-def load_chunk_texts(rag_dataset_path: Path) -> dict[str, str]:
-    chunk_texts: dict[str, str] = {}
-    with rag_dataset_path.open("r", encoding="utf-8") as fp:
-        for line in fp:
-            row = json.loads(line)
-            if row.get("record_type") != "raw_chunk":
-                continue
-            chunk_id = str(row.get("chunk_id", "")).strip()
-            text = str(row.get("text", "")).strip()
-            if chunk_id and text:
-                chunk_texts[chunk_id] = text
-    return chunk_texts
-
-
-def _rank_weight(rank: int) -> float:
-    # Rank-aware contrastive weighting:
-    # - 1..5: hardest negatives, full weight
-    # - 6..15: medium-hard negatives
-    # - 16..50: tail negatives
-    if rank <= 5:
-        return 1.0
-    if rank <= 15:
-        return 0.7
-    return 0.4
+from ingestion.loaders import load_chunk_texts
+from utils.common import rank_weight
 
 
 def _extract_failure_sample_fields(sample: dict) -> dict[str, object]:
@@ -111,7 +88,7 @@ def _collect_negative_ids(
         if negative_id in negative_weights:
             continue
         negative_ids.append(negative_id)
-        negative_weights[negative_id] = sample_weight * _rank_weight(rank)
+        negative_weights[negative_id] = sample_weight * rank_weight(rank)
 
     if source_miss_type in {"embedding_miss", "bm25_miss"} and len(negative_ids) < max_negatives:
         for rank, negative_id in enumerate(retrieved_full, start=len(negative_ids) + 1):
@@ -122,7 +99,7 @@ def _collect_negative_ids(
             if negative_id not in chunk_texts:
                 continue
             negative_ids.append(negative_id)
-            negative_weights[negative_id] = sample_weight * _rank_weight(rank)
+            negative_weights[negative_id] = sample_weight * rank_weight(rank)
 
     return negative_ids, negative_weights
 

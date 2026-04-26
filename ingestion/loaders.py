@@ -81,6 +81,22 @@ def load_bm25_documents_from_dataset(dataset_path: str = "data/rag_dataset.jsonl
     ]
 
 
+def load_chunk_texts(rag_dataset_path: str | Path) -> dict[str, str]:
+    """
+    Load chunk_id -> text map from raw_chunk rows.
+
+    Used by reranker dataset/training utilities.
+    """
+    dataset_path = str(rag_dataset_path)
+    chunk_texts: dict[str, str] = {}
+    for item in _read_raw_chunks(dataset_path):
+        chunk_id = str(item.get("chunk_id", "")).strip()
+        text = str(item.get("text", "")).strip()
+        if chunk_id and text:
+            chunk_texts[chunk_id] = text
+    return chunk_texts
+
+
 def load_semantic_documents_from_faiss(
     persist_directory: str = "artifacts/faiss",
     index_name: str = "rag_chunks",

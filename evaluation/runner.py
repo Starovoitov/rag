@@ -20,6 +20,10 @@ from utils.embedding_format import format_query_for_embedding
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-base-v2"
 
 
+def _retrieval_cache_key(query: str, top_k: int) -> str:
+    return f"{query}||{top_k}"
+
+
 class Retriever(Protocol):
     def search(self, query: str, top_k: int) -> list[str]:
         ...
@@ -46,7 +50,7 @@ class SemanticRetriever:
         self.query_cache = query_cache
 
     def search(self, query: str, top_k: int) -> list[str]:
-        cache_key = f"{query}||{top_k}"
+        cache_key = _retrieval_cache_key(query, top_k)
         if self.query_cache is not None:
             cached = self.query_cache.get(cache_key)
             if cached is not None:
@@ -69,7 +73,7 @@ class BM25Retriever:
         self.query_cache = query_cache
 
     def search(self, query: str, top_k: int) -> list[str]:
-        cache_key = f"{query}||{top_k}"
+        cache_key = _retrieval_cache_key(query, top_k)
         if self.query_cache is not None:
             cached = self.query_cache.get(cache_key)
             if cached is not None:
@@ -101,7 +105,7 @@ class HybridRetriever:
         self.query_cache = query_cache
 
     def search(self, query: str, top_k: int) -> list[str]:
-        cache_key = f"{query}||{top_k}"
+        cache_key = _retrieval_cache_key(query, top_k)
         if self.query_cache is not None:
             cached = self.query_cache.get(cache_key)
             if cached is not None:
@@ -273,20 +277,21 @@ def main() -> None:
         item["id"]: item["text"] for item in load_bm25_documents_from_dataset(args.rag_dataset)
     }
     reranker = None
+    rerank_candidate_cls = None
     if args.rerank:
-        from reranking.cross_encoder import CrossEncoderReranker
+        # Heavy reranker deps are loaded only when reranking is enabled.
+        from reranking.cross_encoder import CrossEncoderReranker, RerankCandidate
 
         reranker = CrossEncoderReranker(model_name=args.reranker_model)
+        rerank_candidate_cls = RerankCandidate
     query_runs: list[QueryRun] = []
     metric_inputs: list[RetrievalResult] = []
     for sample in samples:
         retrieve_k = max(max_k, args.rerank_candidates) if args.rerank else max_k
         retrieved = retriever.search(sample.query, top_k=retrieve_k)
         if reranker is not None:
-            from reranking.cross_encoder import RerankCandidate
-
             rerank_input = [
-                RerankCandidate(
+                rerank_candidate_cls(
                     doc_id=doc_id,
                     text=doc_text_map.get(doc_id, ""),
                 )
