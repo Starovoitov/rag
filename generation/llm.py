@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from dataclasses import dataclass
 from typing import Any, Iterator
 
 import requests
+from caching import LRUTTLCache
 from retry import retry
 from utils.logger import get_json_logger, log_event
 
@@ -26,6 +28,49 @@ class LLMConfig:
     top_p: float = 0.95
     enable_streaming: bool = False
     log_path: str = "experiments/logs/llm_api_calls.jsonl"
+    cache_enabled: bool = False
+    cache_capacity: int = 512
+    cache_ttl_seconds: float = 300.0
+
+
+_LLM_RESPONSE_CACHE: LRUTTLCache[str, str] | None = None
+
+
+def _llm_cache_key(system_prompt: str, user_prompt: str, config: LLMConfig) -> str:
+    payload = {
+        "provider": config.provider,
+        "model": config.model,
+        "api_base": config.api_base,
+        "max_tokens": config.max_tokens,
+        "temperature": config.temperature,
+        "top_p": config.top_p,
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _get_llm_cache(config: LLMConfig) -> LRUTTLCache[str, str]:
+    global _LLM_RESPONSE_CACHE
+    if _LLM_RESPONSE_CACHE is None:
+        _LLM_RESPONSE_CACHE = LRUTTLCache(
+            capacity=max(1, config.cache_capacity),
+            ttl_seconds=max(0.1, config.cache_ttl_seconds),
+            cleanup_interval_seconds=30.0,
+        )
+        return _LLM_RESPONSE_CACHE
+
+    if (
+        _LLM_RESPONSE_CACHE.capacity != max(1, config.cache_capacity)
+        or _LLM_RESPONSE_CACHE.default_ttl_seconds != max(0.1, config.cache_ttl_seconds)
+    ):
+        _LLM_RESPONSE_CACHE = LRUTTLCache(
+            capacity=max(1, config.cache_capacity),
+            ttl_seconds=max(0.1, config.cache_ttl_seconds),
+            cleanup_interval_seconds=30.0,
+        )
+    return _LLM_RESPONSE_CACHE
 
 
 def _headers(config: LLMConfig) -> dict[str, str]:
@@ -98,6 +143,30 @@ def call_llm(
     conf = config or LLMConfig()
     start = time.perf_counter()
     logger = get_json_logger("generation.llm", conf.log_path)
+    cache_key = ""
+    cache: LRUTTLCache[str, str] | None = None
+    if conf.cache_enabled:
+        cache = _get_llm_cache(conf)
+        cache_key = _llm_cache_key(system_prompt, user_prompt, conf)
+        cached_answer = cache.get(cache_key)
+        if cached_answer is not None:
+            log_event(
+                logger,
+                {
+                    "provider": conf.provider,
+                    "model": conf.model,
+                    "stream": False,
+                    "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                    "ok": True,
+                    "cache_hit": True,
+                    "answer_preview": cached_answer[:200],
+                    "max_tokens": conf.max_tokens,
+                    "temperature": conf.temperature,
+                    "top_p": conf.top_p,
+                    "retries_configured": conf.retries,
+                },
+            )
+            return cached_answer
 
     @retry(
         exceptions=Exception,
@@ -118,6 +187,8 @@ def call_llm(
 
     try:
         answer = _request_once_impl()
+        if cache is not None and cache_key:
+            cache.set(cache_key, answer)
         log_event(
             logger,
             {
@@ -126,6 +197,7 @@ def call_llm(
                 "stream": False,
                 "elapsed_ms": int((time.perf_counter() - start) * 1000),
                 "ok": True,
+                "cache_hit": False,
                 "answer_preview": answer[:200],
                 "max_tokens": conf.max_tokens,
                 "temperature": conf.temperature,

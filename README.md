@@ -29,6 +29,11 @@ Available commands:
 - `run_rag` - run full RAG query against selected LLM provider
 - `cleanup_faiss` - remove FAISS index (optionally remove full FAISS directory)
 
+Caching support:
+- `caching/lru_ttl_cache.py` provides in-memory LRU + TTL cache primitives
+- retrieval cache available in `evaluation_runner` / `reranker_pipeline`
+- LLM cache available in `evaluation_runner`, `reranker_pipeline`, and `run_rag`
+
 Reranking support:
 - `reranking/cross_encoder.py` provides `CrossEncoderReranker`
 - available in `demo_retrieval`, `evaluation_runner`, and `run_rag` via `--rerank`
@@ -55,6 +60,7 @@ Sources (URLs / GitHub / docs / community pages)
 - `data/` - source inputs and core datasets (e.g. `data/rag_dataset.jsonl`, `data/evaluation_with_evidence.jsonl`)
 - `artifacts/` - generated assets used by pipelines (e.g. `artifacts/faiss`, `artifacts/datasets/reranker_train.jsonl`, `artifacts/models/reranker-failure-driven`)
 - `experiments/` - run outputs for analysis (e.g. `experiments/results/retrieval_report_best.json`, `experiments/logs/*.jsonl`)
+- `caching/` - reusable cache implementations (currently in-memory LRU + TTL)
 
 ## Common workflows
 
@@ -116,6 +122,28 @@ Then run retrieval benchmark:
 python main.py evaluation_runner --dataset data/evaluation_with_evidence.jsonl --retriever hybrid --k-values 1,3,5 --out-json data/retrieval_report.json
 ```
 
+With retrieval + query-expansion LLM caching:
+
+```bash
+python main.py evaluation_runner --dataset data/evaluation_with_evidence.jsonl --retriever hybrid --k-values 1,3,5 --retrieval-cache-enabled --llm-cache-enabled --out-json data/retrieval_report.json
+```
+
+Tune cache capacity/TTL:
+
+```bash
+python main.py evaluation_runner \
+  --dataset data/evaluation_with_evidence.jsonl \
+  --retriever hybrid \
+  --k-values 1,3,5 \
+  --retrieval-cache-enabled \
+  --retrieval-cache-capacity 15000 \
+  --retrieval-cache-ttl-seconds 600 \
+  --llm-cache-enabled \
+  --llm-cache-capacity 1024 \
+  --llm-cache-ttl-seconds 900 \
+  --out-json data/retrieval_report.json
+```
+
 Evaluate only questions that have non-empty `chunk_ids`:
 
 ```bash
@@ -140,6 +168,12 @@ With cross-encoder reranking:
 python main.py run_rag --question "What is RAG?" --provider openai --rerank --reranker-model cross-encoder/ms-marco-MiniLM-L-6-v2 --rerank-candidates 20
 ```
 
+With LLM response caching (LRU + TTL):
+
+```bash
+python main.py run_rag --question "What is RAG?" --provider openai --llm-cache-enabled --llm-cache-capacity 512 --llm-cache-ttl-seconds 300
+```
+
 ### 6) One-shot reranker pipeline
 
 Run tuned retrieval evaluation and export hard-negative reranker training data in one command:
@@ -152,6 +186,12 @@ Run full pipeline with in-loop reranker training:
 
 ```bash
 python main.py reranker_pipeline --train-reranker
+```
+
+Run with retrieval + LLM caches enabled:
+
+```bash
+python main.py reranker_pipeline --retrieval-cache-enabled --llm-cache-enabled
 ```
 
 Default outputs:
@@ -201,3 +241,7 @@ python main.py cleanup_faiss --faiss-path artifacts/faiss --drop-persist-directo
 - If a source fails to parse, a `source_error` record is still written.
 - For semantic retrieval and RAG, `intfloat/e5-base-v2` is used by default.
 - If network is restricted, model loading may require local cache/offline mode.
+- Cache behavior:
+  - retrieval cache keys include query text and `top_k`,
+  - LLM cache keys include model/provider, generation params, and prompts,
+  - expired entries are cleaned automatically by TTL cleanup.

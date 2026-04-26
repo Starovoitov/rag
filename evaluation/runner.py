@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
 
+from caching import LRUTTLCache
 from sentence_transformers import SentenceTransformer
 
 from evaluation.dataset import EvalSample, load_eval_samples
@@ -32,28 +33,52 @@ class QueryRun:
 
 
 class SemanticRetriever:
-    def __init__(self, documents: list[SemanticDocument], embedding_model: str) -> None:
+    def __init__(
+        self,
+        documents: list[SemanticDocument],
+        embedding_model: str,
+        *,
+        query_cache: LRUTTLCache[str, list[str]] | None = None,
+    ) -> None:
         self.documents = documents
         self.embedder = SentenceTransformer(embedding_model)
         self.embedding_model = embedding_model
+        self.query_cache = query_cache
 
     def search(self, query: str, top_k: int) -> list[str]:
+        cache_key = f"{query}||{top_k}"
+        if self.query_cache is not None:
+            cached = self.query_cache.get(cache_key)
+            if cached is not None:
+                return list(cached)
         query_embedding = self.embedder.encode(
             [format_query_for_embedding(query, self.embedding_model)],
             normalize_embeddings=True,
             show_progress_bar=False,
         )[0].tolist()
         hits = search_semantic(query_embedding, self.documents, top_k=top_k)
-        return [item.doc_id for item in hits]
+        doc_ids = [item.doc_id for item in hits]
+        if self.query_cache is not None:
+            self.query_cache.set(cache_key, doc_ids)
+        return doc_ids
 
 
 class BM25Retriever:
-    def __init__(self, index: BM25Index) -> None:
+    def __init__(self, index: BM25Index, *, query_cache: LRUTTLCache[str, list[str]] | None = None) -> None:
         self.index = index
+        self.query_cache = query_cache
 
     def search(self, query: str, top_k: int) -> list[str]:
+        cache_key = f"{query}||{top_k}"
+        if self.query_cache is not None:
+            cached = self.query_cache.get(cache_key)
+            if cached is not None:
+                return list(cached)
         hits = self.index.search(query, top_k=top_k)
-        return [item.doc_id for item in hits]
+        doc_ids = [item.doc_id for item in hits]
+        if self.query_cache is not None:
+            self.query_cache.set(cache_key, doc_ids)
+        return doc_ids
 
 
 class HybridRetriever:
@@ -65,6 +90,7 @@ class HybridRetriever:
         candidate_multiplier: int = 2,
         max_per_group: int = 1,
         rrf_k: float = 60.0,
+        query_cache: LRUTTLCache[str, list[str]] | None = None,
     ) -> None:
         self.semantic = semantic
         self.bm25 = bm25
@@ -72,8 +98,14 @@ class HybridRetriever:
         self.candidate_multiplier = max(1, candidate_multiplier)
         self.max_per_group = max_per_group
         self.rrf_k = rrf_k
+        self.query_cache = query_cache
 
     def search(self, query: str, top_k: int) -> list[str]:
+        cache_key = f"{query}||{top_k}"
+        if self.query_cache is not None:
+            cached = self.query_cache.get(cache_key)
+            if cached is not None:
+                return list(cached)
         query_embedding = self.semantic.embedder.encode(
             [format_query_for_embedding(query, self.semantic.embedding_model)],
             normalize_embeddings=True,
@@ -90,7 +122,10 @@ class HybridRetriever:
             max_per_group=self.max_per_group,
             rrf_k=self.rrf_k,
         )
-        return [item.doc_id for item in merged]
+        doc_ids = [item.doc_id for item in merged]
+        if self.query_cache is not None:
+            self.query_cache.set(cache_key, doc_ids)
+        return doc_ids
 
 
 def build_retriever(
@@ -104,12 +139,22 @@ def build_retriever(
     hybrid_candidate_multiplier: int = 2,
     hybrid_max_per_group: int = 1,
     hybrid_rrf_k: float = 60.0,
+    cache_enabled: bool = False,
+    cache_capacity: int = 10000,
+    cache_ttl_seconds: float = 300.0,
 ) -> Retriever:
+    query_cache: LRUTTLCache[str, list[str]] | None = None
+    if cache_enabled:
+        query_cache = LRUTTLCache[str, list[str]](
+            capacity=max(1, cache_capacity),
+            ttl_seconds=max(0.1, cache_ttl_seconds),
+            cleanup_interval_seconds=30.0,
+        )
     if mode == "semantic":
         docs = load_semantic_documents_from_faiss(persist_directory=faiss_path, index_name=index_name)
         if not docs:
             raise ValueError(f"No semantic docs in FAISS index '{index_name}' at '{faiss_path}'.")
-        return SemanticRetriever(docs, embedding_model=embedding_model)
+        return SemanticRetriever(docs, embedding_model=embedding_model, query_cache=query_cache)
 
     bm25_docs = load_bm25_documents_from_dataset(rag_dataset_path)
     if not bm25_docs:
@@ -121,7 +166,7 @@ def build_retriever(
         ]
     )
     if mode == "bm25":
-        return BM25Retriever(index=bm25_index)
+        return BM25Retriever(index=bm25_index, query_cache=query_cache)
     if mode == "hybrid":
         semantic_docs = load_semantic_documents_from_faiss(persist_directory=faiss_path, index_name=index_name)
         if not semantic_docs:
@@ -134,6 +179,7 @@ def build_retriever(
             candidate_multiplier=hybrid_candidate_multiplier,
             max_per_group=hybrid_max_per_group,
             rrf_k=hybrid_rrf_k,
+            query_cache=query_cache,
         )
     raise ValueError(f"Unsupported retriever mode: {mode}")
 
@@ -182,6 +228,9 @@ def main() -> None:
     parser.add_argument("--index", default="rag_chunks")
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--alpha", type=float, default=0.7, help="Hybrid semantic/BM25 mix.")
+    parser.add_argument("--retrieval-cache-enabled", action="store_true")
+    parser.add_argument("--retrieval-cache-capacity", type=int, default=10000)
+    parser.add_argument("--retrieval-cache-ttl-seconds", type=float, default=300.0)
     parser.add_argument("--rerank", action="store_true", help="Apply cross-encoder reranking.")
     parser.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     parser.add_argument("--rerank-candidates", type=int, default=20)
@@ -216,6 +265,9 @@ def main() -> None:
         index_name=args.index,
         embedding_model=args.embedding_model,
         alpha=args.alpha,
+        cache_enabled=args.retrieval_cache_enabled,
+        cache_capacity=args.retrieval_cache_capacity,
+        cache_ttl_seconds=args.retrieval_cache_ttl_seconds,
     )
     doc_text_map = {
         item["id"]: item["text"] for item in load_bm25_documents_from_dataset(args.rag_dataset)

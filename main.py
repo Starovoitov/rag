@@ -128,6 +128,9 @@ def _llm_structured_query_expansion(
     api_key: str | None,
     timeout_seconds: int,
     retries: int,
+    cache_enabled: bool = False,
+    cache_capacity: int = 512,
+    cache_ttl_seconds: float = 300.0,
 ) -> tuple[list[str], list[str], list[str]]:
     from generation.llm import call_llm
     from generation.run_rag import get_llm_config
@@ -142,6 +145,9 @@ def _llm_structured_query_expansion(
     conf.top_p = 1.0
     conf.timeout_seconds = max(1, timeout_seconds)
     conf.retries = max(0, retries)
+    conf.cache_enabled = cache_enabled
+    conf.cache_capacity = max(1, cache_capacity)
+    conf.cache_ttl_seconds = max(0.1, cache_ttl_seconds)
     system_prompt = (
         "Generate retrieval queries that maximize document coverage. "
         "Return strict JSON only with keys: paraphrases, decompositions, concept_expansions. "
@@ -171,6 +177,9 @@ def _llm_structured_query_expansion_batch(
     api_key: str | None,
     timeout_seconds: int,
     retries: int,
+    cache_enabled: bool = False,
+    cache_capacity: int = 512,
+    cache_ttl_seconds: float = 300.0,
 ) -> dict[str, tuple[list[str], list[str], list[str]]]:
     from generation.llm import call_llm
     from generation.run_rag import get_llm_config
@@ -189,6 +198,9 @@ def _llm_structured_query_expansion_batch(
     conf.top_p = 1.0
     conf.timeout_seconds = max(1, timeout_seconds)
     conf.retries = max(0, retries)
+    conf.cache_enabled = cache_enabled
+    conf.cache_capacity = max(1, cache_capacity)
+    conf.cache_ttl_seconds = max(0.1, cache_ttl_seconds)
 
     system_prompt = (
         "Generate retrieval queries that maximize document coverage. "
@@ -239,6 +251,9 @@ def _build_query_variants(
     llm_api_key: str | None = None,
     llm_timeout_seconds: int = 8,
     llm_retries: int = 0,
+    llm_cache_enabled: bool = False,
+    llm_cache_capacity: int = 512,
+    llm_cache_ttl_seconds: float = 300.0,
     llm_precomputed: tuple[list[str], list[str], list[str]] | None = None,
 ) -> list[str]:
     variants, _ = _build_query_variants_with_debug(
@@ -251,6 +266,9 @@ def _build_query_variants(
         llm_api_key=llm_api_key,
         llm_timeout_seconds=llm_timeout_seconds,
         llm_retries=llm_retries,
+        llm_cache_enabled=llm_cache_enabled,
+        llm_cache_capacity=llm_cache_capacity,
+        llm_cache_ttl_seconds=llm_cache_ttl_seconds,
         llm_precomputed=llm_precomputed,
     )
     return variants
@@ -267,6 +285,9 @@ def _build_query_variants_with_debug(
     llm_api_key: str | None = None,
     llm_timeout_seconds: int = 8,
     llm_retries: int = 0,
+    llm_cache_enabled: bool = False,
+    llm_cache_capacity: int = 512,
+    llm_cache_ttl_seconds: float = 300.0,
     llm_precomputed: tuple[list[str], list[str], list[str]] | None = None,
 ) -> tuple[list[str], dict[str, object]]:
     base = query.strip()
@@ -297,6 +318,9 @@ def _build_query_variants_with_debug(
                 api_key=llm_api_key,
                 timeout_seconds=llm_timeout_seconds,
                 retries=llm_retries,
+                cache_enabled=llm_cache_enabled,
+                cache_capacity=llm_cache_capacity,
+                cache_ttl_seconds=llm_cache_ttl_seconds,
             )
         llm_generated = _dedupe_query_variants(llm_paraphrase + llm_decomposition + llm_concepts)
         llm_generated_preview = llm_generated[:3]
@@ -928,6 +952,9 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         hybrid_candidate_multiplier=args.hybrid_candidate_multiplier,
         hybrid_max_per_group=args.hybrid_max_per_group,
         hybrid_rrf_k=args.hybrid_rrf_k,
+        cache_enabled=args.retrieval_cache_enabled,
+        cache_capacity=args.retrieval_cache_capacity,
+        cache_ttl_seconds=args.retrieval_cache_ttl_seconds,
     )
     semantic_embedding_map: dict[str, list[float]] = {}
     if args.retriever == "hybrid":
@@ -965,6 +992,9 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             api_key=args.multi_query_llm_api_key,
             timeout_seconds=args.multi_query_llm_timeout_seconds,
             retries=args.multi_query_llm_retries,
+            cache_enabled=args.llm_cache_enabled,
+            cache_capacity=args.llm_cache_capacity,
+            cache_ttl_seconds=args.llm_cache_ttl_seconds,
         )
     for sample in samples:
         retrieve_k = max(max_k, args.rerank_candidates) if args.rerank else max_k
@@ -1005,6 +1035,9 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 llm_api_key=args.multi_query_llm_api_key,
                 llm_timeout_seconds=args.multi_query_llm_timeout_seconds,
                 llm_retries=args.multi_query_llm_retries,
+                llm_cache_enabled=args.llm_cache_enabled,
+                llm_cache_capacity=args.llm_cache_capacity,
+                llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
                 llm_precomputed=llm_expansion_cache.get(sample.query),
             )
             if args.multi_query_llm_debug and llm_debug.get("llm_requested"):
@@ -1183,6 +1216,14 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         "soft_recall_rescue_tail_k": args.soft_recall_rescue_tail_k if args.soft_recall_rescue else 0,
         "soft_recall_rescue_bm25_depth": args.soft_recall_rescue_bm25_depth if args.soft_recall_rescue else 0,
         "multi_query_enabled": args.multi_query,
+        "cache": {
+            "retrieval_enabled": args.retrieval_cache_enabled,
+            "retrieval_capacity": args.retrieval_cache_capacity,
+            "retrieval_ttl_seconds": args.retrieval_cache_ttl_seconds,
+            "llm_enabled": args.llm_cache_enabled,
+            "llm_capacity": args.llm_cache_capacity,
+            "llm_ttl_seconds": args.llm_cache_ttl_seconds,
+        },
         "mmr_before_rerank": args.mmr_before_rerank,
         "mmr_lambda": args.mmr_lambda if args.mmr_before_rerank else None,
         "mmr_k": args.mmr_k if args.mmr_before_rerank else None,
@@ -1322,6 +1363,9 @@ def cmd_run_rag(args: argparse.Namespace) -> None:
         rerank=args.rerank,
         reranker_model=args.reranker_model,
         rerank_candidates=args.rerank_candidates,
+        llm_cache_enabled=args.llm_cache_enabled,
+        llm_cache_capacity=args.llm_cache_capacity,
+        llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
     )
 
 
@@ -1377,6 +1421,12 @@ def cmd_reranker_pipeline(args: argparse.Namespace) -> None:
         multi_query_llm_timeout_seconds=args.multi_query_llm_timeout_seconds,
         multi_query_llm_retries=args.multi_query_llm_retries,
         multi_query_llm_debug=args.multi_query_llm_debug,
+        retrieval_cache_enabled=args.retrieval_cache_enabled,
+        retrieval_cache_capacity=args.retrieval_cache_capacity,
+        retrieval_cache_ttl_seconds=args.retrieval_cache_ttl_seconds,
+        llm_cache_enabled=args.llm_cache_enabled,
+        llm_cache_capacity=args.llm_cache_capacity,
+        llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
         soft_recall_rescue=True,
         soft_recall_rescue_tail_k=20,
         soft_recall_rescue_bm25_depth=200,
@@ -1655,6 +1705,20 @@ def build_parser() -> argparse.ArgumentParser:
     eval_cmd.add_argument("--multi-query-llm-retries", type=int, default=0)
     eval_cmd.add_argument("--multi-query-llm-debug", action="store_true")
     eval_cmd.add_argument(
+        "--retrieval-cache-enabled",
+        action="store_true",
+        help="Enable in-memory cache for retrieval query results.",
+    )
+    eval_cmd.add_argument("--retrieval-cache-capacity", type=int, default=10000)
+    eval_cmd.add_argument("--retrieval-cache-ttl-seconds", type=float, default=300.0)
+    eval_cmd.add_argument(
+        "--llm-cache-enabled",
+        action="store_true",
+        help="Enable in-memory cache for LLM calls (query expansion / generation).",
+    )
+    eval_cmd.add_argument("--llm-cache-capacity", type=int, default=512)
+    eval_cmd.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
+    eval_cmd.add_argument(
         "--soft-recall-rescue",
         action="store_true",
         help="Inject BM25-only tail candidates into reranker pool after hybrid retrieval.",
@@ -1750,6 +1814,12 @@ def build_parser() -> argparse.ArgumentParser:
     rerank_pipeline_cmd.add_argument("--multi-query-llm-timeout-seconds", type=int, default=8)
     rerank_pipeline_cmd.add_argument("--multi-query-llm-retries", type=int, default=0)
     rerank_pipeline_cmd.add_argument("--multi-query-llm-debug", action="store_true")
+    rerank_pipeline_cmd.add_argument("--retrieval-cache-enabled", action="store_true")
+    rerank_pipeline_cmd.add_argument("--retrieval-cache-capacity", type=int, default=10000)
+    rerank_pipeline_cmd.add_argument("--retrieval-cache-ttl-seconds", type=float, default=300.0)
+    rerank_pipeline_cmd.add_argument("--llm-cache-enabled", action="store_true")
+    rerank_pipeline_cmd.add_argument("--llm-cache-capacity", type=int, default=512)
+    rerank_pipeline_cmd.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
     rerank_pipeline_cmd.add_argument("--out-json", default="experiments/results/retrieval_report_best.json")
     rerank_pipeline_cmd.add_argument(
         "--export-reranker-train-jsonl",
@@ -1786,6 +1856,9 @@ def build_parser() -> argparse.ArgumentParser:
     rag_cmd.add_argument("--rerank", action="store_true")
     rag_cmd.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     rag_cmd.add_argument("--rerank-candidates", type=int, default=20)
+    rag_cmd.add_argument("--llm-cache-enabled", action="store_true")
+    rag_cmd.add_argument("--llm-cache-capacity", type=int, default=512)
+    rag_cmd.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
     rag_cmd.set_defaults(handler=cmd_run_rag)
 
     clean_cmd = subparsers.add_parser("cleanup_faiss", help="Delete FAISS index and optionally full directory.")

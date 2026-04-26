@@ -74,6 +74,9 @@ flowchart TD
 - `generation/run_rag.py`, `generation/prompt.py`, `generation/llm.py`  
   Builds grounded prompts from top chunks and queries OpenAI-compatible providers (`openai`, `gigachat`, `ollama`, `qwen`).
 
+- `caching/lru_ttl_cache.py`  
+  Generic in-memory LRU + TTL cache with periodic cleanup, access counters, and hit/miss telemetry.
+
 - `main.py`  
   Unified orchestrator for parsing, retrieval demo, evaluation, reranker pipeline, and RAG execution.
 
@@ -177,6 +180,11 @@ For a query with `TopK` and `Relevant`:
   - exports `reranker_context_v1` with positives, negatives, and per-negative weights,
   - rank-aware weighting and bucket-aware weighting for hard negatives,
   - in-loop training option from `main.py reranker_pipeline`.
+
+- Caching subsystem:
+  - retrieval-side cache for repeated query/top-k lookups in evaluation pipelines,
+  - LLM response cache for query expansion and `run_rag`,
+  - LRU eviction + TTL expiry + periodic cleanup to balance memory usage and freshness.
 
 ---
 

@@ -89,6 +89,9 @@ def run_rag(
     rerank: bool = False,
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
     rerank_candidates: int = 20,
+    llm_cache_enabled: bool = False,
+    llm_cache_capacity: int = 512,
+    llm_cache_ttl_seconds: float = 300.0,
 ) -> None:
     semantic_docs = load_semantic_documents_from_faiss(
         persist_directory=faiss_path,
@@ -161,6 +164,9 @@ def run_rag(
     conf.temperature = temperature
     conf.top_p = top_p
     conf.enable_streaming = stream
+    conf.cache_enabled = llm_cache_enabled
+    conf.cache_capacity = max(1, llm_cache_capacity)
+    conf.cache_ttl_seconds = max(0.1, llm_cache_ttl_seconds)
 
     print("Used sources:")
     for idx, chunk in enumerate(prompt_data["used_chunks"], start=1):
@@ -207,6 +213,9 @@ def main() -> None:
     parser.add_argument("--rerank", action="store_true", help="Apply cross-encoder reranking.")
     parser.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     parser.add_argument("--rerank-candidates", type=int, default=20)
+    parser.add_argument("--llm-cache-enabled", action="store_true", help="Enable in-memory LLM response cache.")
+    parser.add_argument("--llm-cache-capacity", type=int, default=512)
+    parser.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
     args = parser.parse_args()
 
     run_rag(
@@ -225,5 +234,8 @@ def main() -> None:
         rerank=args.rerank,
         reranker_model=args.reranker_model,
         rerank_candidates=args.rerank_candidates,
+        llm_cache_enabled=args.llm_cache_enabled,
+        llm_cache_capacity=args.llm_cache_capacity,
+        llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
     )
 
