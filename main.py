@@ -1008,7 +1008,21 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             cache_capacity=args.llm_cache_capacity,
             cache_ttl_seconds=args.llm_cache_ttl_seconds,
         )
-    for sample in samples:
+
+    total_samples = len(samples)
+    try:
+        from tqdm import tqdm  # type: ignore
+
+        sample_iter = tqdm(samples, total=total_samples, desc="evaluation_runner", unit="sample")
+        logger.info("tqdm progress bar enabled for evaluation loop")
+    except ImportError:
+        sample_iter = samples
+        logger.warning("tqdm is not available; falling back to plain loop progress logging")
+
+    progress_log_step = max(1, total_samples // 20)  # ~5% increments
+    for sample_idx, sample in enumerate(sample_iter, start=1):
+        if sample_idx == 1 or sample_idx % progress_log_step == 0 or sample_idx == total_samples:
+            logger.info("evaluation progress: %s/%s", sample_idx, total_samples)
         retrieve_k = max(max_k, args.rerank_candidates) if args.rerank else max_k
         semantic_branch_doc_ids: list[str] | None = None
         bm25_branch_doc_ids: list[str] | None = None
