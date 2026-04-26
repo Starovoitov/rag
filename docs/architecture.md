@@ -186,6 +186,12 @@ For a query with `TopK` and `Relevant`:
   - LLM response cache for query expansion and `run_rag`,
   - LRU eviction + TTL expiry + periodic cleanup to balance memory usage and freshness.
 
+- Observability and runtime logging:
+  - centralized runtime logger configuration (`log level`, `text/json`, optional file sink),
+  - stage-level `INFO` logs for retrieval/evaluation/RAG execution flow,
+  - `WARNING` for risky conditions (e.g., filtered datasets, empty context),
+  - `ERROR` logs with stack traces on failures.
+
 ---
 
 ## Operational Entrypoints

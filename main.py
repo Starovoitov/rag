@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING
 from utils.common import tokenize
+from utils.logger import configure_runtime_logger
 
 if TYPE_CHECKING:
     from reranking.cross_encoder import RerankCandidate
@@ -927,14 +928,26 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
     from evaluation.runner import QueryRun, build_retriever, parse_k_values
     from ingestion.loaders import load_bm25_documents_from_dataset
 
+    logger = configure_runtime_logger(
+        "rag.evaluation_runner",
+        level=args.log_level,
+        log_path=args.log_path,
+        json_logs=args.log_json,
+    )
+    logger.info("starting evaluation runner")
     samples = load_eval_samples(Path(args.dataset))
     if not samples:
+        logger.error("no evaluation samples found: %s", args.dataset)
         raise ValueError(f"No samples found in dataset: {args.dataset}")
     total_samples_before_filter = len(samples)
+    logger.info("loaded evaluation samples: count=%s", total_samples_before_filter)
     if args.require_evidence:
         samples = [sample for sample in samples if sample.relevant_docs]
     filtered_out_samples = total_samples_before_filter - len(samples)
+    if filtered_out_samples > 0:
+        logger.warning("filtered out samples without evidence: count=%s", filtered_out_samples)
     if not samples:
+        logger.error("no samples left after filtering")
         raise ValueError(
             "No samples left after filtering. "
             "Try running without --require-evidence or regenerate dataset with more evidence links."
@@ -942,6 +955,12 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
 
     k_values = parse_k_values(args.k_values)
     max_k = max(k_values)
+    logger.info(
+        "building retriever: mode=%s max_k=%s retrieval_cache_enabled=%s",
+        args.retriever,
+        max_k,
+        args.retrieval_cache_enabled,
+    )
     retriever = build_retriever(
         args.retriever,
         rag_dataset_path=args.rag_dataset,
@@ -965,10 +984,12 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
     doc_text_map = {
         item["id"]: item["text"] for item in load_bm25_documents_from_dataset(args.rag_dataset)
     }
+    logger.info("loaded bm25 text map: count=%s", len(doc_text_map))
     reranker = None
     if args.rerank:
         from reranking.cross_encoder import CrossEncoderReranker
 
+        logger.info("initializing reranker: model=%s", args.reranker_model)
         reranker = CrossEncoderReranker(model_name=args.reranker_model)
 
     query_runs: list[QueryRun] = []
@@ -1342,6 +1363,8 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"Saved JSON report to {out_path}")
+        logger.info("saved json report: %s", out_path)
+    logger.info("evaluation runner completed successfully")
 
 
 def cmd_run_rag(args: argparse.Namespace) -> None:
@@ -1366,6 +1389,9 @@ def cmd_run_rag(args: argparse.Namespace) -> None:
         llm_cache_enabled=args.llm_cache_enabled,
         llm_cache_capacity=args.llm_cache_capacity,
         llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
+        log_level=args.log_level,
+        log_path=args.log_path,
+        log_json=args.log_json,
     )
 
 
@@ -1427,6 +1453,9 @@ def cmd_reranker_pipeline(args: argparse.Namespace) -> None:
         llm_cache_enabled=args.llm_cache_enabled,
         llm_cache_capacity=args.llm_cache_capacity,
         llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
+        log_level=args.log_level,
+        log_path=args.log_path,
+        log_json=args.log_json,
         soft_recall_rescue=True,
         soft_recall_rescue_tail_k=20,
         soft_recall_rescue_bm25_depth=200,
@@ -1718,6 +1747,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_cmd.add_argument("--llm-cache-capacity", type=int, default=512)
     eval_cmd.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
+    eval_cmd.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
+    eval_cmd.add_argument("--log-path", default=None, help="Optional runtime log file path.")
+    eval_cmd.add_argument("--log-json", action="store_true", help="Emit runtime logs in JSON format.")
     eval_cmd.add_argument(
         "--soft-recall-rescue",
         action="store_true",
@@ -1820,6 +1852,9 @@ def build_parser() -> argparse.ArgumentParser:
     rerank_pipeline_cmd.add_argument("--llm-cache-enabled", action="store_true")
     rerank_pipeline_cmd.add_argument("--llm-cache-capacity", type=int, default=512)
     rerank_pipeline_cmd.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
+    rerank_pipeline_cmd.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
+    rerank_pipeline_cmd.add_argument("--log-path", default=None)
+    rerank_pipeline_cmd.add_argument("--log-json", action="store_true")
     rerank_pipeline_cmd.add_argument("--out-json", default="experiments/results/retrieval_report_best.json")
     rerank_pipeline_cmd.add_argument(
         "--export-reranker-train-jsonl",
@@ -1859,6 +1894,9 @@ def build_parser() -> argparse.ArgumentParser:
     rag_cmd.add_argument("--llm-cache-enabled", action="store_true")
     rag_cmd.add_argument("--llm-cache-capacity", type=int, default=512)
     rag_cmd.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
+    rag_cmd.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
+    rag_cmd.add_argument("--log-path", default="data/last_run.log", help="Optional runtime log file path.")
+    rag_cmd.add_argument("--log-json", action="store_true", help="Emit runtime logs in JSON format.")
     rag_cmd.set_defaults(handler=cmd_run_rag)
 
     clean_cmd = subparsers.add_parser("cleanup_faiss", help="Delete FAISS index and optionally full directory.")

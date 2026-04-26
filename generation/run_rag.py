@@ -11,6 +11,7 @@ from generation.prompt import SourceChunk, build_rag_messages
 from ingestion.loaders import load_semantic_documents_from_faiss
 from retrieval.semantic import search_semantic
 from utils.embedding_format import format_query_for_embedding
+from utils.logger import configure_runtime_logger
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-base-v2"
 
@@ -92,103 +93,140 @@ def run_rag(
     llm_cache_enabled: bool = False,
     llm_cache_capacity: int = 512,
     llm_cache_ttl_seconds: float = 300.0,
+    log_level: str = "INFO",
+    log_path: str | None = None,
+    log_json: bool = False,
 ) -> None:
-    semantic_docs = load_semantic_documents_from_faiss(
-        persist_directory=faiss_path,
-        index_name=index_name,
+    logger = configure_runtime_logger(
+        "rag.run_rag",
+        level=log_level,
+        log_path=log_path,
+        json_logs=log_json,
     )
-    if not semantic_docs:
-        raise ValueError(
-            f"No semantic docs in FAISS index '{index_name}' at '{faiss_path}'. "
-            "Run ingestion first."
+    logger.info("starting run_rag pipeline")
+    try:
+        semantic_docs = load_semantic_documents_from_faiss(
+            persist_directory=faiss_path,
+            index_name=index_name,
         )
+        if not semantic_docs:
+            logger.error("no semantic docs found in FAISS index")
+            raise ValueError(
+                f"No semantic docs in FAISS index '{index_name}' at '{faiss_path}'. "
+                "Run ingestion first."
+            )
+        logger.info("loaded semantic documents: count=%s", len(semantic_docs))
 
-    embedder = SentenceTransformer(embedding_model)
-    query_embedding = embedder.encode(
-        [format_query_for_embedding(question, embedding_model)],
-        normalize_embeddings=True,
-        show_progress_bar=False,
-    )[0].tolist()
-    query_dim = len(query_embedding)
-    doc_dim = len(semantic_docs[0].embedding) if semantic_docs else 0
-    if doc_dim and query_dim != doc_dim:
-        suggested_doc_model = _guess_embedding_models_by_dim(doc_dim)
-        suggested_query_model = _guess_embedding_models_by_dim(query_dim)
-        raise ValueError(
-            "Embedding dimension mismatch between query and indexed documents: "
-            f"query_dim={query_dim} (model='{embedding_model}', likely '{suggested_query_model}'), "
-            f"doc_dim={doc_dim} (likely '{suggested_doc_model}'). "
-            "Use `--embedding-model` that matches the model used during index build, "
-            "or rebuild the FAISS index with the selected embedding model."
-        )
+        logger.info("loading embedding model: %s", embedding_model)
+        embedder = SentenceTransformer(embedding_model)
+        query_embedding = embedder.encode(
+            [format_query_for_embedding(question, embedding_model)],
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )[0].tolist()
+        query_dim = len(query_embedding)
+        doc_dim = len(semantic_docs[0].embedding) if semantic_docs else 0
+        logger.info("encoded query embedding: query_dim=%s doc_dim=%s", query_dim, doc_dim)
+        if doc_dim and query_dim != doc_dim:
+            suggested_doc_model = _guess_embedding_models_by_dim(doc_dim)
+            suggested_query_model = _guess_embedding_models_by_dim(query_dim)
+            logger.error("embedding dimension mismatch detected")
+            raise ValueError(
+                "Embedding dimension mismatch between query and indexed documents: "
+                f"query_dim={query_dim} (model='{embedding_model}', likely '{suggested_query_model}'), "
+                f"doc_dim={doc_dim} (likely '{suggested_doc_model}'). "
+                "Use `--embedding-model` that matches the model used during index build, "
+                "or rebuild the FAISS index with the selected embedding model."
+            )
 
-    candidate_k = max(top_k * 2, 10)
-    if rerank:
-        candidate_k = max(candidate_k, rerank_candidates)
-    hits = search_semantic(query_embedding, semantic_docs, top_k=candidate_k)
-    if rerank:
-        from reranking.cross_encoder import CrossEncoderReranker, RerankCandidate
+        candidate_k = max(top_k * 2, 10)
+        if rerank:
+            candidate_k = max(candidate_k, rerank_candidates)
+        logger.info("running semantic retrieval: top_k=%s candidate_k=%s", top_k, candidate_k)
+        hits = search_semantic(query_embedding, semantic_docs, top_k=candidate_k)
+        logger.info("retrieval completed: hits=%s", len(hits))
+        if rerank:
+            from reranking.cross_encoder import CrossEncoderReranker, RerankCandidate
 
-        reranker = CrossEncoderReranker(model_name=reranker_model)
-        hits = reranker.rerank(
-            query=question,
-            candidates=[
-                RerankCandidate(
-                    doc_id=item.doc_id,
-                    text=item.text,
-                    score=item.score,
-                    metadata=item.metadata,
-                )
-                for item in hits
-            ],
+            logger.info("running reranker: model=%s", reranker_model)
+            reranker = CrossEncoderReranker(model_name=reranker_model)
+            hits = reranker.rerank(
+                query=question,
+                candidates=[
+                    RerankCandidate(
+                        doc_id=item.doc_id,
+                        text=item.text,
+                        score=item.score,
+                        metadata=item.metadata,
+                    )
+                    for item in hits
+                ],
+                top_k=top_k,
+            )
+            logger.info("reranking completed: hits=%s", len(hits))
+        chunks = [
+            SourceChunk(
+                doc_id=item.doc_id,
+                text=item.text,
+                score=item.score,
+                metadata=item.metadata,
+            )
+            for item in hits
+        ]
+        prompt_data = build_rag_messages(
+            question=question,
+            chunks=chunks,
             top_k=top_k,
+            max_context_tokens=max_context_tokens,
         )
-    chunks = [
-        SourceChunk(
-            doc_id=item.doc_id,
-            text=item.text,
-            score=item.score,
-            metadata=item.metadata,
+        if not prompt_data["used_chunks"]:
+            logger.warning("prompt built with zero chunks")
+        logger.info("prompt built: used_chunks=%s", len(prompt_data["used_chunks"]))
+
+        conf = get_llm_config(provider=provider, model=model)
+        conf.max_tokens = max_tokens
+        conf.temperature = temperature
+        conf.top_p = top_p
+        conf.enable_streaming = stream
+        conf.cache_enabled = llm_cache_enabled
+        conf.cache_capacity = max(1, llm_cache_capacity)
+        conf.cache_ttl_seconds = max(0.1, llm_cache_ttl_seconds)
+        logger.info(
+            "configured llm call: provider=%s model=%s stream=%s cache_enabled=%s",
+            provider,
+            conf.model,
+            stream,
+            conf.cache_enabled,
         )
-        for item in hits
-    ]
-    prompt_data = build_rag_messages(
-        question=question,
-        chunks=chunks,
-        top_k=top_k,
-        max_context_tokens=max_context_tokens,
-    )
 
-    conf = get_llm_config(provider=provider, model=model)
-    conf.max_tokens = max_tokens
-    conf.temperature = temperature
-    conf.top_p = top_p
-    conf.enable_streaming = stream
-    conf.cache_enabled = llm_cache_enabled
-    conf.cache_capacity = max(1, llm_cache_capacity)
-    conf.cache_ttl_seconds = max(0.1, llm_cache_ttl_seconds)
+        print("Used sources:")
+        for idx, chunk in enumerate(prompt_data["used_chunks"], start=1):
+            print(f"[{idx}] {chunk.doc_id}")
 
-    print("Used sources:")
-    for idx, chunk in enumerate(prompt_data["used_chunks"], start=1):
-        print(f"[{idx}] {chunk.doc_id}")
+        print("\nAnswer:")
+        if stream:
+            logger.info("starting streaming answer")
+            for token in stream_llm(
+                system_prompt=prompt_data["system_prompt"],
+                user_prompt=prompt_data["user_prompt"],
+                config=conf,
+            ):
+                print(token, end="", flush=True)
+            print()
+            logger.info("streaming answer finished")
+            return
 
-    print("\nAnswer:")
-    if stream:
-        for token in stream_llm(
+        logger.info("starting non-stream llm call")
+        answer = call_llm(
             system_prompt=prompt_data["system_prompt"],
             user_prompt=prompt_data["user_prompt"],
             config=conf,
-        ):
-            print(token, end="", flush=True)
-        print()
-        return
-
-    answer = call_llm(
-        system_prompt=prompt_data["system_prompt"],
-        user_prompt=prompt_data["user_prompt"],
-        config=conf,
-    )
-    print(answer)
+        )
+        print(answer)
+        logger.info("run_rag completed successfully")
+    except Exception:
+        logger.exception("run_rag failed")
+        raise
 
 
 def main() -> None:
@@ -216,6 +254,9 @@ def main() -> None:
     parser.add_argument("--llm-cache-enabled", action="store_true", help="Enable in-memory LLM response cache.")
     parser.add_argument("--llm-cache-capacity", type=int, default=512)
     parser.add_argument("--llm-cache-ttl-seconds", type=float, default=300.0)
+    parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
+    parser.add_argument("--log-path", default=None, help="Optional runtime log file path.")
+    parser.add_argument("--log-json", action="store_true", help="Emit runtime logs in JSON format.")
     args = parser.parse_args()
 
     run_rag(
@@ -237,5 +278,8 @@ def main() -> None:
         llm_cache_enabled=args.llm_cache_enabled,
         llm_cache_capacity=args.llm_cache_capacity,
         llm_cache_ttl_seconds=args.llm_cache_ttl_seconds,
+        log_level=args.log_level,
+        log_path=args.log_path,
+        log_json=args.log_json,
     )
 

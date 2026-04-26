@@ -174,6 +174,17 @@ With LLM response caching (LRU + TTL):
 python main.py run_rag --question "What is RAG?" --provider openai --llm-cache-enabled --llm-cache-capacity 512 --llm-cache-ttl-seconds 300
 ```
 
+With advanced runtime logging:
+
+```bash
+python main.py run_rag \
+  --question "What is RAG?" \
+  --provider openai \
+  --log-level INFO \
+  --log-path experiments/logs/run_rag.log \
+  --log-json
+```
+
 ### 6) One-shot reranker pipeline
 
 Run tuned retrieval evaluation and export hard-negative reranker training data in one command:
@@ -245,3 +256,8 @@ python main.py cleanup_faiss --faiss-path artifacts/faiss --drop-persist-directo
   - retrieval cache keys include query text and `top_k`,
   - LLM cache keys include model/provider, generation params, and prompts,
   - expired entries are cleaned automatically by TTL cleanup.
+- Logging behavior:
+  - stage-level `INFO` logs are emitted for major pipeline steps,
+  - potential issues are emitted as `WARNING`,
+  - failures are emitted as `ERROR` with exception traces,
+  - logging controls: `--log-level`, `--log-path`, `--log-json`.
