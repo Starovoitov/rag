@@ -150,6 +150,31 @@ class TestFaissStore(unittest.TestCase):
             self.assertFalse((workspace / "rag_chunks").exists())
             self.assertTrue((workspace / "data" / "faiss" / "rag_chunks" / "store.json").exists())
 
+    def test_save_does_not_attempt_migration_for_dot_index_name(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(workspace)
+                saved = self.faiss_store.save_faiss_index(
+                    [
+                        {
+                            "id": "d1",
+                            "text": "doc1",
+                            "embedding": [0.1, 0.2],
+                            "metadata": {},
+                        }
+                    ],
+                    persist_directory="data/faiss",
+                    index_name=".",
+                )
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertEqual(saved, 1)
+            self.assertTrue((workspace / "data" / "faiss" / "vectors.index").exists())
+            self.assertTrue((workspace / "data" / "faiss" / "store.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

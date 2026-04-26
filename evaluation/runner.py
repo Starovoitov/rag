@@ -229,7 +229,7 @@ def main() -> None:
     parser.add_argument("--k-values", default="1,3,5")
     parser.add_argument("--rag-dataset", default="data/rag_dataset.jsonl")
     parser.add_argument("--faiss-path", default="data/faiss")
-    parser.add_argument("--index", default="rag_chunks")
+    parser.add_argument("--index", default=".")
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--alpha", type=float, default=0.7, help="Hybrid semantic/BM25 mix.")
     parser.add_argument("--retrieval-cache-enabled", action="store_true")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 def cleanup_faiss_db(
     persist_directory: str = "data/faiss",
-    index_name: str = "rag_chunks",
+    index_name: str = ".",
     drop_persist_directory: bool = False,
 ) -> dict[str, bool]:
     """Clean up FAISS index folder and optionally remove all persisted FAISS data."""

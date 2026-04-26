@@ -158,7 +158,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--index",
-        default="rag_chunks",
+        default=".",
         help="FAISS index name with precomputed embeddings.",
     )
     parser.add_argument(

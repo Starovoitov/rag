@@ -14,6 +14,7 @@ from utils.embedding_format import format_query_for_embedding
 from utils.logger import configure_runtime_logger
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-base-v2"
+FALLBACK_LLM_PROVIDERS: tuple[str, ...] = ("openai", "gigachat", "ollama", "qwen")
 
 def _guess_embedding_models_by_dim(dim: int) -> str:
     known_dims = {
@@ -39,6 +40,15 @@ def get_llm_config(provider: str, model: str | None = None, *, config_path: str 
 def build_model_configs(config_path: str = DEFAULT_LLM_CONFIG_PATH) -> dict[str, LLMConfig]:
     """Named provider configs loaded from root config."""
     return load_llm_provider_configs(config_path=config_path)
+
+
+def _load_known_providers_safe(config_path: str) -> tuple[str, ...]:
+    """Load provider names for argparse without failing when config is missing."""
+    try:
+        provider_names = tuple(load_llm_provider_configs(config_path=config_path).keys())
+        return provider_names or FALLBACK_LLM_PROVIDERS
+    except Exception:
+        return FALLBACK_LLM_PROVIDERS
 
 
 
@@ -202,7 +212,7 @@ def run_rag(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a single RAG query against one LLM provider.")
     parser.add_argument("--question", "-q", required=True, help="Question to ask.")
-    known_providers = tuple(load_llm_provider_configs().keys())
+    known_providers = _load_known_providers_safe(DEFAULT_LLM_CONFIG_PATH)
     parser.add_argument(
         "--provider",
         default=known_providers[0],
@@ -213,7 +223,7 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--max-context-tokens", type=int, default=2500)
     parser.add_argument("--faiss-path", default="data/faiss")
-    parser.add_argument("--index", default="rag_chunks")
+    parser.add_argument("--index", default=".")
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
     parser.add_argument("--stream", action="store_true", help="Stream answer tokens.")
     parser.add_argument("--max-tokens", type=int, default=512)

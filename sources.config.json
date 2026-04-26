@@ -479,6 +479,45 @@
         "data leakage controls",
         "production risk mitigation"
       ]
+    },
+    {
+      "category": "advanced_rag_ideas",
+      "subtopic": "graph_rag_vs_vector_rag",
+      "url": "https://www.couchbase.com/blog/graph-rag-vs-vector-rag/",
+      "source_type": "blog",
+      "priority_topics": [
+        "graph rag vs vector rag",
+        "multi-hop reasoning",
+        "knowledge graph nodes and edges",
+        "relationship-aware retrieval",
+        "production tradeoffs for graph rag"
+      ]
+    },
+    {
+      "category": "advanced_rag_ideas",
+      "subtopic": "graph_rag_paper",
+      "url": "https://arxiv.org/abs/2404.16130",
+      "source_type": "arxiv",
+      "priority_topics": [
+        "graph rag architecture",
+        "entity extraction to knowledge graph",
+        "graph communities and summarization",
+        "global reasoning over graph structure",
+        "comparison with naive rag baselines"
+      ]
+    },
+    {
+      "category": "advanced_rag_ideas",
+      "subtopic": "graph_rag_hybrid_production",
+      "url": "https://airbyte.com/agentic-data/graph-rag-vs-vector-rag",
+      "source_type": "docs",
+      "priority_topics": [
+        "hybrid graph and vector retrieval",
+        "single-hop vs multi-hop query patterns",
+        "when vector rag is sufficient",
+        "when graph rag is preferable",
+        "production architecture for hybrid rag"
+      ]
     }
   ]
 }

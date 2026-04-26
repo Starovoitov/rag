@@ -25,6 +25,13 @@ def _maybe_migrate_legacy_index_dir(persist_directory: str, index_name: str) -> 
     if target_root.exists():
         return target_root
 
+    # Never treat cwd/parent/special values as a legacy index directory name.
+    normalized_name = index_name.strip()
+    if normalized_name in {"", ".", ".."}:
+        return target_root
+    if Path(normalized_name).name != normalized_name:
+        return target_root
+
     legacy_root = Path(index_name)
     if not legacy_root.is_dir():
         return target_root
@@ -50,7 +57,7 @@ def _persist_paths(persist_directory: str, index_name: str) -> Path:
 def save_faiss_index(
     embedding_records: list[dict[str, Any]],
     persist_directory: str = "data/faiss",
-    index_name: str = "rag_chunks",
+    index_name: str = ".",
 ) -> int:
     """
     Build a FAISS IndexFlatIP index from normalized embedding vectors and persist.
@@ -90,7 +97,7 @@ def save_faiss_index(
 
 def load_semantic_documents_from_faiss(
     persist_directory: str = "data/faiss",
-    index_name: str = "rag_chunks",
+    index_name: str = ".",
 ) -> list[SemanticDocument]:
     """Load vectors and parallel text/metadata from a persisted FAISS index."""
     root = _maybe_migrate_legacy_index_dir(persist_directory, index_name)

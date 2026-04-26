@@ -10,7 +10,7 @@ if [[ -z "${EMBEDDING_MODEL// }" ]]; then
   EMBEDDING_MODEL="intfloat/e5-base-v2"
 fi
 FAISS_PATH="${FAISS_PATH:-data/faiss}"
-FAISS_INDEX_NAME="${FAISS_INDEX_NAME:-faiss}"
+FAISS_INDEX_NAME="${FAISS_INDEX_NAME:-.}"
 RERANKER_MODEL="${RERANKER_MODEL:-artifacts/models/reranker-failure-driven}"
 if [[ ! -d "$RERANKER_MODEL" ]]; then
   RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-12-v2"
@@ -74,10 +74,13 @@ python main.py evaluation_runner \
   --faiss-path "$FAISS_PATH" \
   --index "$FAISS_INDEX_NAME" \
   --embedding-model "$EMBEDDING_MODEL" \
-  --rerank-candidates 150 \
-  --rerank-alpha 0.35 \
-  --ce-calibration zscore \
-  --ce-temperature 1.0 \
+  --reranker-model "$RERANKER_MODEL" \
+  --rerank-semantic-weight 0.75 \
+  --rerank-bm25-weight 0.25 \
+  --rerank-candidates 80 \
+  --rerank-alpha 0.4 \
+  --ce-calibration softmax \
+  --ce-temperature 0.7 \
   --hybrid-candidate-multiplier 100 \
   --hybrid-rrf-k 80 \
   --multi-query \
@@ -85,12 +88,9 @@ python main.py evaluation_runner \
   --multi-query-rrf-k 60 \
   --stratified-rerank-pool \
   --hard-negative-semantic-floor 0.12 \
-  --rerank-semantic-weight 0.75 \
-  --rerank-bm25-weight 0.25 \
   --soft-recall-rescue \
   --soft-recall-rescue-tail-k 30 \
   --soft-recall-rescue-bm25-depth 300 \
-  --reranker-model "$RERANKER_MODEL" \
   --mmr-before-rerank \
   --mmr-lambda 0.82 \
   --mmr-k 35 \

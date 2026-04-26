@@ -119,7 +119,7 @@ python main.py build_parser \
 ### 2) Build embeddings + FAISS
 
 ```bash
-python -c "from embeddings.embedder import prepare_embedding_input, build_faiss_index; prepare_embedding_input('data/rag_dataset.jsonl', 'data/embeddings_input.jsonl'); build_faiss_index(input_jsonl='data/embeddings_input.jsonl', persist_directory='data/faiss', index_name='rag_chunks')"
+python -c "from embeddings.embedder import prepare_embedding_input, build_faiss_index; prepare_embedding_input('data/rag_dataset.jsonl', 'data/embeddings_input.jsonl'); build_faiss_index(input_jsonl='data/embeddings_input.jsonl', persist_directory='data/faiss', index_name='.')"
 ```
 
 ### 3) Retrieval demo
@@ -276,7 +276,7 @@ Field notes:
 Delete one FAISS index:
 
 ```bash
-python main.py cleanup_faiss --faiss-path data/faiss --index rag_chunks
+python main.py cleanup_faiss --faiss-path data/faiss --index .
 ```
 
 Delete full FAISS directory:
