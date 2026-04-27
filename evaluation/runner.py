@@ -239,6 +239,12 @@ def main() -> None:
     parser.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     parser.add_argument("--rerank-candidates", type=int, default=20)
     parser.add_argument(
+        "--rerank-top1-margin-lambda",
+        type=float,
+        default=0.0,
+        help="Post-process top-1 score with lambda * (top1 - top2).",
+    )
+    parser.add_argument(
         "--require-evidence",
         action="store_true",
         help="Evaluate only samples with non-empty expected_evidence.chunk_ids.",
@@ -298,7 +304,12 @@ def main() -> None:
                 for doc_id in retrieved
                 if doc_text_map.get(doc_id, "")
             ]
-            reranked = reranker.rerank(sample.query, rerank_input, top_k=max_k)
+            reranked = reranker.rerank(
+                sample.query,
+                rerank_input,
+                top_k=max_k,
+                top1_margin_lambda=args.rerank_top1_margin_lambda,
+            )
             retrieved = [item.doc_id for item in reranked]
         else:
             retrieved = retrieved[:max_k]
@@ -319,6 +330,7 @@ def main() -> None:
         "retriever": args.retriever,
         "rerank_enabled": args.rerank,
         "reranker_model": args.reranker_model if args.rerank else None,
+        "rerank_top1_margin_lambda": args.rerank_top1_margin_lambda if args.rerank else None,
         "require_evidence": args.require_evidence,
         "k_values": k_values,
         "samples_total": len(samples),

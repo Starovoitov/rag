@@ -75,6 +75,7 @@ def run_rag(
     log_path: str | None = None,
     log_json: bool = False,
     llm_config_path: str = DEFAULT_LLM_CONFIG_PATH,
+    rerank_top1_margin_lambda: float = 0.0,
 ) -> None:
     logger = configure_runtime_logger(
         "rag.run_rag",
@@ -142,6 +143,7 @@ def run_rag(
                     for item in hits
                 ],
                 top_k=top_k,
+                top1_margin_lambda=rerank_top1_margin_lambda,
             )
             logger.info("reranking completed: hits=%s", len(hits))
         chunks = [
@@ -239,6 +241,7 @@ def main() -> None:
     parser.add_argument("--log-path", default=None, help="Optional runtime log file path.")
     parser.add_argument("--log-json", action="store_true", help="Emit runtime logs in JSON format.")
     parser.add_argument("--llm-config-path", default=DEFAULT_LLM_CONFIG_PATH)
+    parser.add_argument("--rerank-top1-margin-lambda", type=float, default=0.0)
     args = parser.parse_args()
 
     run_rag(
@@ -264,5 +267,6 @@ def main() -> None:
         log_path=args.log_path,
         log_json=args.log_json,
         llm_config_path=args.llm_config_path,
+        rerank_top1_margin_lambda=args.rerank_top1_margin_lambda,
     )
 

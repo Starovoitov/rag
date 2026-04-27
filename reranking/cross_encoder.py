@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 import math
 from typing import Any
@@ -96,6 +96,7 @@ class CrossEncoderReranker:
         alpha: float = 0.75,
         ce_calibration: CEScoreCalibrationMode | str = CEScoreCalibrationMode.MINMAX,
         ce_temperature: float = 1.0,
+        top1_margin_lambda: float = 0.75,
     ) -> list[RerankedResult]:
         if not candidates or top_k <= 0:
             return []
@@ -139,4 +140,13 @@ class CrossEncoderReranker:
             )
 
         reranked.sort(key=lambda x: x.score, reverse=True)
+        # Optional post-processing objective:
+        # top1_score <- top1_score + lambda * (top1_score - top2_score)
+        if len(reranked) >= 2 and top1_margin_lambda != 0.0:
+            margin = reranked[0].score - reranked[1].score
+            reranked[0] = replace(
+                reranked[0],
+                score=reranked[0].score + (top1_margin_lambda * margin),
+            )
+            reranked.sort(key=lambda x: x.score, reverse=True)
         return reranked[:top_k]

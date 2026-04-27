@@ -1,4 +1,46 @@
 {
+  "alias_groups": [
+    {
+      "primary": "context stuffing",
+      "aliases": [
+        "adding too much context",
+        "overloading prompt",
+        "excessive retrieval"
+      ]
+    },
+    {
+      "primary": "multi-hop retrieval",
+      "aliases": [
+        "iterative retrieval",
+        "chain retrieval",
+        "query decomposition",
+        "decomposed retrieval"
+      ]
+    },
+    {
+      "primary": "query decomposition",
+      "aliases": [
+        "multi-hop retrieval",
+        "iterative retrieval",
+        "chain retrieval",
+        "decomposed query planning"
+      ]
+    }
+  ],
+  "multi_hop_seed_chunks": [
+    {
+      "title": "Multi-hop Retrieval in RAG",
+      "content": "Multi-hop retrieval in Retrieval-Augmented Generation (RAG) is a retrieval strategy where the system gathers evidence in multiple sequential steps instead of answering from a single retrieval pass. The model first retrieves initial context, then uses entities, claims, or gaps from that context to issue follow-up queries and collect additional documents.\n\nThis concept is also referred to as multi-step retrieval, iterative retrieval, or compositional retrieval. These names describe the same core idea: each retrieval step refines the evidence set for the next step.\n\nExample: for a complex question, the system can first retrieve a document defining a concept, then extract key entities from that document and retrieve supporting details from other sources before generating the final answer."
+    },
+    {
+      "title": "Multi-hop vs Single-hop Retrieval in RAG",
+      "content": "Single-hop retrieval performs one query and attempts to gather all evidence at once. Multi-hop retrieval performs multiple dependent retrieval steps, where each step is informed by previously retrieved context.\n\nSingle-hop is often sufficient for fact lookup questions with direct evidence in one source. Multi-hop is better when the answer requires chaining facts, resolving entities across documents, or combining partial evidence from multiple sources.\n\nIn practice, multi-hop trades extra retrieval latency for higher evidence coverage on complex questions."
+    },
+    {
+      "title": "When to Use Multi-hop Retrieval in RAG",
+      "content": "Use multi-hop retrieval when the question cannot be answered from one document and requires linking evidence across sources. Typical cases include multi-entity reasoning, timeline reconstruction, policy-to-implementation mapping, and comparisons where each source provides only part of the answer.\n\nA practical signal is retrieval uncertainty: if top single-pass results are partially relevant but incomplete, run iterative follow-up retrieval with query reformulation.\n\nGraph-based and agentic RAG are related extensions: graph RAG navigates explicit entity relations, while agentic pipelines decide retrieval actions dynamically. All of these approaches aim to improve grounded answers for complex, multi-evidence queries."
+    }
+  ],
   "sources": [
     {
       "category": "basic_theory",
@@ -132,7 +174,7 @@
     {
       "category": "embedding_theory",
       "subtopic": "mteb",
-      "url": "https://huggingface.co/spaces/mteb/leaderboard",
+      "url": "https://huggingface.co/blog/mteb",
       "source_type": "docs",
       "priority_topics": [
         "how embeddings work",
@@ -144,7 +186,7 @@
     {
       "category": "advanced_rag_ideas",
       "subtopic": "langchain_blog_docs",
-      "url": "https://python.langchain.com/v0.1/docs/use_cases/question_answering/",
+      "url": "https://python.langchain.com/docs/tutorials/rag/",
       "source_type": "docs",
       "priority_topics": [
         "multi-query retrieval",
@@ -168,7 +210,7 @@
     {
       "category": "real_practical_reviews",
       "subtopic": "reddit_community",
-      "url": "https://www.pinecone.io/learn/series/rag/rag-evaluation/",
+      "url": "https://github.com/pinecone-io/examples",
       "source_type": "docs",
       "priority_topics": [
         "chunking problems",
@@ -218,7 +260,7 @@
     {
       "category": "rag_architecture_core",
       "subtopic": "pinecone_rag",
-      "url": "https://www.pinecone.io/learn/series/rag/",
+      "url": "https://github.com/pinecone-io/examples/tree/master/learn/generation",
       "source_type": "docs",
       "priority_topics": [
         "what is rag",
@@ -230,7 +272,7 @@
     {
       "category": "evaluation_metrics",
       "subtopic": "pinecone_rag_evaluation",
-      "url": "https://www.pinecone.io/learn/series/rag/rag-evaluation/",
+      "url": "https://github.com/pinecone-io/examples/tree/master/learn/search",
       "source_type": "docs",
       "priority_topics": [
         "recall@k",
@@ -250,18 +292,6 @@
         "hallucination mitigation",
         "evaluation dimensions",
         "safety and refusal behavior"
-      ]
-    },
-    {
-      "category": "evaluation_metrics",
-      "subtopic": "ragas_faithfulness",
-      "url": "https://docs.ragas.io/en/stable/concepts/metrics/",
-      "source_type": "docs",
-      "priority_topics": [
-        "faithfulness",
-        "groundedness",
-        "supported claims",
-        "hallucination checks"
       ]
     },
     {
@@ -313,18 +343,6 @@
       ]
     },
     {
-      "category": "evaluation_metrics",
-      "subtopic": "confident_ai_rag_eval",
-      "url": "https://www.evidentlyai.com/llm-guide/rag-evaluation",
-      "source_type": "blog",
-      "priority_topics": [
-        "faithfulness",
-        "refusal behavior (i don't know)",
-        "a/b evaluation",
-        "rag quality metrics"
-      ]
-    },
-    {
       "category": "data_quality_chunking",
       "subtopic": "chroma_chunk_eval",
       "url": "https://docs.trychroma.com/usage-guide#chunking",
@@ -361,21 +379,9 @@
       ]
     },
     {
-      "category": "rag_architecture_core",
-      "subtopic": "azure_rag_overview",
-      "url": "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/rag/",
-      "source_type": "docs",
-      "priority_topics": [
-        "rag architecture",
-        "retriever and generator roles",
-        "context construction",
-        "hallucination reduction"
-      ]
-    },
-    {
       "category": "retrieval_indexing_core",
       "subtopic": "pinecone_chunking_strategies",
-      "url": "https://www.pinecone.io/learn/series/rag/chunking-strategies/",
+      "url": "https://github.com/pinecone-io/examples/tree/master/learn",
       "source_type": "docs",
       "priority_topics": [
         "chunk size tradeoffs",
@@ -411,7 +417,7 @@
     {
       "category": "embeddings_vector_db_core",
       "subtopic": "openai_embeddings",
-      "url": "https://platform.openai.com/docs/guides/embeddings/what-are-embeddings",
+      "url": "https://platform.openai.com/docs/guides/embeddings",
       "source_type": "docs",
       "priority_topics": [
         "embedding generation",

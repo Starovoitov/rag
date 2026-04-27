@@ -123,9 +123,12 @@ def build_contexts(
     true_recall_weight: float,
     default_weight: float,
 ) -> tuple[list[dict[str, object]], dict[str, int]]:
+    evaluation = report.get("evaluation", {})
     diagnostics = report.get("diagnostics", {})
     failure_analysis = diagnostics.get("failure_analysis", {})
-    samples = failure_analysis.get("manual_inspection_samples", [])
+    samples = evaluation.get("failed_queries_for_manual_inspection", [])
+    if not samples:
+        samples = failure_analysis.get("manual_inspection_samples", [])
 
     contexts: list[dict[str, object]] = []
     stats = {

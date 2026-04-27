@@ -4,9 +4,9 @@ tags:
 - cross-encoder
 - reranker
 - generated_from_trainer
-- dataset_size:598
+- dataset_size:549
 - loss:BinaryCrossEntropyLoss
-base_model: cross-encoder/ms-marco-MiniLM-L12-v2
+base_model: cross-encoder/ms-marco-MiniLM-L6-v2
 pipeline_tag: text-ranking
 library_name: sentence-transformers
 metrics:
@@ -18,7 +18,7 @@ metrics:
 - recall
 - average_precision
 model-index:
-- name: CrossEncoder based on cross-encoder/ms-marco-MiniLM-L12-v2
+- name: CrossEncoder based on cross-encoder/ms-marco-MiniLM-L6-v2
   results:
   - task:
       type: cross-encoder-binary-classification
@@ -28,37 +28,37 @@ model-index:
       type: failure-driven-val
     metrics:
     - type: accuracy
-      value: 0.6818181818181818
+      value: 0.8360655737704918
       name: Accuracy
     - type: accuracy_threshold
-      value: 4.245023727416992
+      value: 1.4130926132202148
       name: Accuracy Threshold
     - type: f1
-      value: 0.7333333333333334
+      value: 0.8378378378378378
       name: F1
     - type: f1_threshold
-      value: -5.949812889099121
+      value: -0.332133948802948
       name: F1 Threshold
     - type: precision
-      value: 0.5789473684210527
+      value: 0.7209302325581395
       name: Precision
     - type: recall
       value: 1.0
       name: Recall
     - type: average_precision
-      value: 0.7320574162679427
+      value: 0.9099774943735934
       name: Average Precision
 ---
 
-# CrossEncoder based on cross-encoder/ms-marco-MiniLM-L12-v2
+# CrossEncoder based on cross-encoder/ms-marco-MiniLM-L6-v2
 
-This is a [Cross Encoder](https://www.sbert.net/docs/cross_encoder/usage/usage.html) model finetuned from [cross-encoder/ms-marco-MiniLM-L12-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L12-v2) using the [sentence-transformers](https://www.SBERT.net) library. It computes scores for pairs of texts, which can be used for text reranking and semantic search.
+This is a [Cross Encoder](https://www.sbert.net/docs/cross_encoder/usage/usage.html) model finetuned from [cross-encoder/ms-marco-MiniLM-L6-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2) using the [sentence-transformers](https://www.SBERT.net) library. It computes scores for pairs of texts, which can be used for text reranking and semantic search.
 
 ## Model Details
 
 ### Model Description
 - **Model Type:** Cross Encoder
-- **Base model:** [cross-encoder/ms-marco-MiniLM-L12-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L12-v2) <!-- at revision 7b0235231ca2674cb8ca8f022859a6eba2b1c968 -->
+- **Base model:** [cross-encoder/ms-marco-MiniLM-L6-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2) <!-- at revision c5ee24cb16019beea0893ab7796b1df96625c6b8 -->
 - **Maximum Sequence Length:** 512 tokens
 - **Number of Output Labels:** 1 label
 - **Supported Modality:** Text
@@ -99,25 +99,25 @@ from sentence_transformers import CrossEncoder
 model = CrossEncoder("cross_encoder_model_id")
 # Get scores for pairs of inputs
 pairs = [
-    ['What is multi-hop retrieval in RAG?', 'as they move through downstream reasoning steps in an agentic RAG system . TL ; DR - Vector Retrieval - Augmented Generation ( RAG ) is a strong default for single - hop semantic queries , with advantages in simple fact retrieval , response time , and lower implementation cost . - Graph RAG is strongest for multi - hop , relationship - intensive queries where explicit entity connections matter . - Hybrid approaches can outperform either method on mixed workloads , but naive combinations can reduce context relevance . - Fresh data , preserved permissions , and a reliable upstream pipeline matter as much as retrieval architecture for AI agents in production . How Do Graph RAG and Vector RAG Compare ? Vector RAG splits documents into chunks , embeds each chunk into a vector embedding store , and'],
-    ['Can structured and unstructured data be combined?', 'as they move through downstream reasoning steps in an agentic RAG system . TL ; DR - Vector Retrieval - Augmented Generation ( RAG ) is a strong default for single - hop semantic queries , with advantages in simple fact retrieval , response time , and lower implementation cost . - Graph RAG is strongest for multi - hop , relationship - intensive queries where explicit entity connections matter . - Hybrid approaches can outperform either method on mixed workloads , but naive combinations can reduce context relevance . - Fresh data , preserved permissions , and a reliable upstream pipeline matter as much as retrieval architecture for AI agents in production . How Do Graph RAG and Vector RAG Compare ? Vector RAG splits documents into chunks , embeds each chunk into a vector embedding store , and'],
-    ['Can structured and unstructured data be combined?', 'online evaluations , as part of production monitoring . It also depends on how much labeled data you have to design the test . Let ’ s take a look at 3 different approaches . First things first : retrieval isn ’ t a new problem . It ’ s the same task behind every search bar – from e - commerce sites to Google to internal company portals . It ’ s a classic machine learning use case , and there are well - established evaluation methods we can reuse for LLM - powered RAG setups . To apply them , you need a ground truth dataset – your custom retrieval benchmark . For each query , you define the correct sources that contain the answer – these could be document IDs , chunk IDs , or links .'],
-    ['Can structured and unstructured data be combined?', 'like mean - reciprocal rank ( MRR ) , hit - rate , precision , and more . The core retrieval evaluation steps revolve around the following : - Dataset generation : Given an unstructured text corpus , synthetically generate ( question , context ) pairs . - Retrieval Evaluation : Given a retriever and a set of questions , evaluate retrieved results using ranking metrics . Integrations Section titled “ Integrations ” We also integrate with community evaluation tools . - UpTrain - Tonic Validate ( Includes Web UI for visualizing results ) - DeepEval - Ragas - RAGChecker - Cleanlab Usage Pattern Section titled “ Usage Pattern ” For full usage details , see the usage pattern below . Modules Section titled “ Modules ” Notebooks with usage of these components can be found in the module guides , see the usage pattern below . Modules Section titled “ Modules ” Notebooks with usage of these components can be found in the module guides . Evaluating with LabelledRagDataset ’ s Section titled “ Evaluating with LabelledRagDataset ’ s ” For details on how to perform evaluation of a RAG system with various evaluation datasets , called LabelledRagDataset ’ s see below :'],
-    ['What is approximate nearest neighbor (ANN) search?', 'solutions to the different challenges and serving as a guide to systematically developing such applications . References & Citations export BibTeX citation Loading . . . Bibliographic and Citation Tools Bibliographic Explorer ( What is the Explorer ? ) Connected Papers ( What is Connected Papers ? ) Litmaps ( What is Litmaps ? ) scite Smart Citations ( What are Smart Citations ? ) Code , Data and Media Associated with this Article alphaXiv ( What is alphaXiv ? ) CatalyzeX Code Finder for Papers ( What is CatalyzeX ? ) DagsHub ( What is DagsHub ? ) Gotit . pub ( What is GotitPub ? ) Hugging Face ( What is Huggingface ? ) Papers with Code ( What is Papers with Code ? ) ScienceCast ( What is ScienceCast ? ) Demos Recommenders and Search Tools Influence'],
+    ['What is context stuffing?', 'query , it returns a few relevant snippets from your knowledge base . These snippets will then be fed to the Reader Model to help it generate its answer . So our objective here is , given a user question , to find the most relevant snippets from our knowledge base to answer that question . This is a wide objective , it leaves open some questions . How many snippets should we retrieve ? This parameter will be named top_k . How long should these snippets be ? This is called the chunk size . There ’ s no one - size - fits - all answers , but here are a few elements : - 🔀 Your chunk size is allowed to vary from one snippet to the other . - Since there will always be some noise'],
+    ['How can batching improve performance?', 'elements : - 🔀 Your chunk size is allowed to vary from one snippet to the other . - Since there will always be some noise in your retrieval , increasing the top_k increases the chance to get relevant elements in your retrieved snippets . 🎯 Shooting more arrows increases your probability of hitting your target . - Meanwhile , the summed length of your retrieved documents should not be too high : for instance , for most current models 16k tokens will probably drown your Reader model in information due to Lost - in - the - middle phenomenon . 🎯 Give your reader model only the most relevant insights , not a huge pile of books ! In this notebook , we use Langchain library since it offers a huge variety of options for vector databases and allows'],
+    ['How do you ensure consistency in outputs?', ', context , response , and combine these with LLM calls . These evaluation modules are in the following forms : - Correctness : Whether the generated answer matches that of the reference answer given the query ( requires labels ) . - Semantic Similarity Whether the predicted answer is semantically similar to the reference answer ( requires labels ) . - Faithfulness : Evaluates if the answer is faithful to the retrieved contexts ( in other words , whether if there ’ s hallucination ) . - Context Relevancy : Whether retrieved context is relevant to the query . - Answer Relevancy : Whether the generated answer is relevant to the query . - Guideline Adherence : Whether the predicted answer adheres to specific guidelines . Question Generation Section titled “ Question Generation ” In addition to evaluating queries'],
+    ['What is context stuffing?', 'The RAG Triad ¶ RAGs have become the standard architecture for providing LLMs with context in order to avoid hallucinations . However , even RAGs can suffer from hallucination , as is often the case when the retrieval fails to retrieve sufficient context or even retrieves irrelevant context that is then weaved into the LLM ’ s response . TruEra has innovated the RAG triad to evaluate for hallucinations along each edge of the RAG architecture , shown below : The RAG triad is made up of 3 evaluations : context relevance , groundedness and answer relevance . Satisfactory evaluations on each provides us confidence that our LLM app is free from hallucination . Context Relevance ¶ The first step of any RAG application is retrieval ; to verify the quality of our retrieval , we want to make sure'],
+    ['How do you ensure consistency in outputs?', ', users need to view its output as trustworthy . RAG models can include citations to the knowledge sources in their external data as part of their responses . When RAG models cite their sources , human users can verify those outputs to confirm accuracy while consulting the cited works for follow - up clarification and additional information . Corporate data storage is often a complex and siloed maze . RAG responses with citations point users directly toward the materials they need . Access to more data means that one model can handle a wider range of prompts . Enterprises can optimize models and gain more value from them by broadening their knowledge bases , in turn expanding the contexts in which those models generate reliable results . By combining generative AI with retrieval systems , RAG models can retrieve'],
 ]
 scores = model.predict(pairs)
 print(scores)
-# [ -4.8315   7.8104 -10.1379  -8.5325  -9.7408]
+# [ 5.2533  7.9562  7.0701 -4.5685 -3.6864]
 
 # Or rank different texts based on similarity to a single text
 ranks = model.rank(
-    'What is multi-hop retrieval in RAG?',
+    'What is context stuffing?',
     [
-        'as they move through downstream reasoning steps in an agentic RAG system . TL ; DR - Vector Retrieval - Augmented Generation ( RAG ) is a strong default for single - hop semantic queries , with advantages in simple fact retrieval , response time , and lower implementation cost . - Graph RAG is strongest for multi - hop , relationship - intensive queries where explicit entity connections matter . - Hybrid approaches can outperform either method on mixed workloads , but naive combinations can reduce context relevance . - Fresh data , preserved permissions , and a reliable upstream pipeline matter as much as retrieval architecture for AI agents in production . How Do Graph RAG and Vector RAG Compare ? Vector RAG splits documents into chunks , embeds each chunk into a vector embedding store , and',
-        'as they move through downstream reasoning steps in an agentic RAG system . TL ; DR - Vector Retrieval - Augmented Generation ( RAG ) is a strong default for single - hop semantic queries , with advantages in simple fact retrieval , response time , and lower implementation cost . - Graph RAG is strongest for multi - hop , relationship - intensive queries where explicit entity connections matter . - Hybrid approaches can outperform either method on mixed workloads , but naive combinations can reduce context relevance . - Fresh data , preserved permissions , and a reliable upstream pipeline matter as much as retrieval architecture for AI agents in production . How Do Graph RAG and Vector RAG Compare ? Vector RAG splits documents into chunks , embeds each chunk into a vector embedding store , and',
-        'online evaluations , as part of production monitoring . It also depends on how much labeled data you have to design the test . Let ’ s take a look at 3 different approaches . First things first : retrieval isn ’ t a new problem . It ’ s the same task behind every search bar – from e - commerce sites to Google to internal company portals . It ’ s a classic machine learning use case , and there are well - established evaluation methods we can reuse for LLM - powered RAG setups . To apply them , you need a ground truth dataset – your custom retrieval benchmark . For each query , you define the correct sources that contain the answer – these could be document IDs , chunk IDs , or links .',
-        'like mean - reciprocal rank ( MRR ) , hit - rate , precision , and more . The core retrieval evaluation steps revolve around the following : - Dataset generation : Given an unstructured text corpus , synthetically generate ( question , context ) pairs . - Retrieval Evaluation : Given a retriever and a set of questions , evaluate retrieved results using ranking metrics . Integrations Section titled “ Integrations ” We also integrate with community evaluation tools . - UpTrain - Tonic Validate ( Includes Web UI for visualizing results ) - DeepEval - Ragas - RAGChecker - Cleanlab Usage Pattern Section titled “ Usage Pattern ” For full usage details , see the usage pattern below . Modules Section titled “ Modules ” Notebooks with usage of these components can be found in the module guides , see the usage pattern below . Modules Section titled “ Modules ” Notebooks with usage of these components can be found in the module guides . Evaluating with LabelledRagDataset ’ s Section titled “ Evaluating with LabelledRagDataset ’ s ” For details on how to perform evaluation of a RAG system with various evaluation datasets , called LabelledRagDataset ’ s see below :',
-        'solutions to the different challenges and serving as a guide to systematically developing such applications . References & Citations export BibTeX citation Loading . . . Bibliographic and Citation Tools Bibliographic Explorer ( What is the Explorer ? ) Connected Papers ( What is Connected Papers ? ) Litmaps ( What is Litmaps ? ) scite Smart Citations ( What are Smart Citations ? ) Code , Data and Media Associated with this Article alphaXiv ( What is alphaXiv ? ) CatalyzeX Code Finder for Papers ( What is CatalyzeX ? ) DagsHub ( What is DagsHub ? ) Gotit . pub ( What is GotitPub ? ) Hugging Face ( What is Huggingface ? ) Papers with Code ( What is Papers with Code ? ) ScienceCast ( What is ScienceCast ? ) Demos Recommenders and Search Tools Influence',
+        'query , it returns a few relevant snippets from your knowledge base . These snippets will then be fed to the Reader Model to help it generate its answer . So our objective here is , given a user question , to find the most relevant snippets from our knowledge base to answer that question . This is a wide objective , it leaves open some questions . How many snippets should we retrieve ? This parameter will be named top_k . How long should these snippets be ? This is called the chunk size . There ’ s no one - size - fits - all answers , but here are a few elements : - 🔀 Your chunk size is allowed to vary from one snippet to the other . - Since there will always be some noise',
+        'elements : - 🔀 Your chunk size is allowed to vary from one snippet to the other . - Since there will always be some noise in your retrieval , increasing the top_k increases the chance to get relevant elements in your retrieved snippets . 🎯 Shooting more arrows increases your probability of hitting your target . - Meanwhile , the summed length of your retrieved documents should not be too high : for instance , for most current models 16k tokens will probably drown your Reader model in information due to Lost - in - the - middle phenomenon . 🎯 Give your reader model only the most relevant insights , not a huge pile of books ! In this notebook , we use Langchain library since it offers a huge variety of options for vector databases and allows',
+        ', context , response , and combine these with LLM calls . These evaluation modules are in the following forms : - Correctness : Whether the generated answer matches that of the reference answer given the query ( requires labels ) . - Semantic Similarity Whether the predicted answer is semantically similar to the reference answer ( requires labels ) . - Faithfulness : Evaluates if the answer is faithful to the retrieved contexts ( in other words , whether if there ’ s hallucination ) . - Context Relevancy : Whether retrieved context is relevant to the query . - Answer Relevancy : Whether the generated answer is relevant to the query . - Guideline Adherence : Whether the predicted answer adheres to specific guidelines . Question Generation Section titled “ Question Generation ” In addition to evaluating queries',
+        'The RAG Triad ¶ RAGs have become the standard architecture for providing LLMs with context in order to avoid hallucinations . However , even RAGs can suffer from hallucination , as is often the case when the retrieval fails to retrieve sufficient context or even retrieves irrelevant context that is then weaved into the LLM ’ s response . TruEra has innovated the RAG triad to evaluate for hallucinations along each edge of the RAG architecture , shown below : The RAG triad is made up of 3 evaluations : context relevance , groundedness and answer relevance . Satisfactory evaluations on each provides us confidence that our LLM app is free from hallucination . Context Relevance ¶ The first step of any RAG application is retrieval ; to verify the quality of our retrieval , we want to make sure',
+        ', users need to view its output as trustworthy . RAG models can include citations to the knowledge sources in their external data as part of their responses . When RAG models cite their sources , human users can verify those outputs to confirm accuracy while consulting the cited works for follow - up clarification and additional information . Corporate data storage is often a complex and siloed maze . RAG responses with citations point users directly toward the materials they need . Access to more data means that one model can handle a wider range of prompts . Enterprises can optimize models and gain more value from them by broadening their knowledge bases , in turn expanding the contexts in which those models generate reliable results . By combining generative AI with retrieval systems , RAG models can retrieve',
     ]
 )
 # [{'corpus_id': ..., 'score': ...}, {'corpus_id': ..., 'score': ...}, ...]
@@ -156,15 +156,15 @@ You can finetune this model on your own dataset.
 * Dataset: `failure-driven-val`
 * Evaluated with [<code>CEBinaryClassificationEvaluator</code>](https://sbert.net/docs/package_reference/cross_encoder/evaluation.html#sentence_transformers.cross_encoder.evaluation.CEBinaryClassificationEvaluator)
 
-| Metric                | Value      |
-|:----------------------|:-----------|
-| accuracy              | 0.6818     |
-| accuracy_threshold    | 4.245      |
-| f1                    | 0.7333     |
-| f1_threshold          | -5.9498    |
-| precision             | 0.5789     |
-| recall                | 1.0        |
-| **average_precision** | **0.7321** |
+| Metric                | Value    |
+|:----------------------|:---------|
+| accuracy              | 0.8361   |
+| accuracy_threshold    | 1.4131   |
+| f1                    | 0.8378   |
+| f1_threshold          | -0.3321  |
+| precision             | 0.7209   |
+| recall                | 1.0      |
+| **average_precision** | **0.91** |
 
 <!--
 ## Bias, Risks and Limitations
@@ -184,19 +184,19 @@ You can finetune this model on your own dataset.
 
 #### Unnamed Dataset
 
-* Size: 598 training samples
+* Size: 549 training samples
 * Columns: <code>sentence_0</code>, <code>sentence_1</code>, and <code>label</code>
-* Approximate statistics based on the first 598 samples:
-  |         | sentence_0                                                                        | sentence_1                                                                            | label                                                         |
-  |:--------|:----------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:--------------------------------------------------------------|
-  | type    | string                                                                            | string                                                                                | float                                                         |
-  | details | <ul><li>min: 7 tokens</li><li>mean: 10.54 tokens</li><li>max: 12 tokens</li></ul> | <ul><li>min: 144 tokens</li><li>mean: 164.59 tokens</li><li>max: 265 tokens</li></ul> | <ul><li>min: 0.0</li><li>mean: 0.5</li><li>max: 1.0</li></ul> |
+* Approximate statistics based on the first 549 samples:
+  |         | sentence_0                                                                       | sentence_1                                                                            | label                                                         |
+  |:--------|:---------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:--------------------------------------------------------------|
+  | type    | string                                                                           | string                                                                                | float                                                         |
+  | details | <ul><li>min: 7 tokens</li><li>mean: 10.0 tokens</li><li>max: 12 tokens</li></ul> | <ul><li>min: 121 tokens</li><li>mean: 159.58 tokens</li><li>max: 257 tokens</li></ul> | <ul><li>min: 0.0</li><li>mean: 0.5</li><li>max: 1.0</li></ul> |
 * Samples:
-  | sentence_0                                                     | sentence_1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | label            |
-  |:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------|
-  | <code>What is multi-hop retrieval in RAG?</code>               | <code>as they move through downstream reasoning steps in an agentic RAG system . TL ; DR - Vector Retrieval - Augmented Generation ( RAG ) is a strong default for single - hop semantic queries , with advantages in simple fact retrieval , response time , and lower implementation cost . - Graph RAG is strongest for multi - hop , relationship - intensive queries where explicit entity connections matter . - Hybrid approaches can outperform either method on mixed workloads , but naive combinations can reduce context relevance . - Fresh data , preserved permissions , and a reliable upstream pipeline matter as much as retrieval architecture for AI agents in production . How Do Graph RAG and Vector RAG Compare ? Vector RAG splits documents into chunks , embeds each chunk into a vector embedding store , and</code> | <code>0.0</code> |
-  | <code>Can structured and unstructured data be combined?</code> | <code>as they move through downstream reasoning steps in an agentic RAG system . TL ; DR - Vector Retrieval - Augmented Generation ( RAG ) is a strong default for single - hop semantic queries , with advantages in simple fact retrieval , response time , and lower implementation cost . - Graph RAG is strongest for multi - hop , relationship - intensive queries where explicit entity connections matter . - Hybrid approaches can outperform either method on mixed workloads , but naive combinations can reduce context relevance . - Fresh data , preserved permissions , and a reliable upstream pipeline matter as much as retrieval architecture for AI agents in production . How Do Graph RAG and Vector RAG Compare ? Vector RAG splits documents into chunks , embeds each chunk into a vector embedding store , and</code> | <code>1.0</code> |
-  | <code>Can structured and unstructured data be combined?</code> | <code>online evaluations , as part of production monitoring . It also depends on how much labeled data you have to design the test . Let ’ s take a look at 3 different approaches . First things first : retrieval isn ’ t a new problem . It ’ s the same task behind every search bar – from e - commerce sites to Google to internal company portals . It ’ s a classic machine learning use case , and there are well - established evaluation methods we can reuse for LLM - powered RAG setups . To apply them , you need a ground truth dataset – your custom retrieval benchmark . For each query , you define the correct sources that contain the answer – these could be document IDs , chunk IDs , or links .</code>                                                                                                                | <code>0.0</code> |
+  | sentence_0                                             | sentence_1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | label            |
+  |:-------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------|
+  | <code>What is context stuffing?</code>                 | <code>query , it returns a few relevant snippets from your knowledge base . These snippets will then be fed to the Reader Model to help it generate its answer . So our objective here is , given a user question , to find the most relevant snippets from our knowledge base to answer that question . This is a wide objective , it leaves open some questions . How many snippets should we retrieve ? This parameter will be named top_k . How long should these snippets be ? This is called the chunk size . There ’ s no one - size - fits - all answers , but here are a few elements : - 🔀 Your chunk size is allowed to vary from one snippet to the other . - Since there will always be some noise</code>                                                                                                                                            | <code>1.0</code> |
+  | <code>How can batching improve performance?</code>     | <code>elements : - 🔀 Your chunk size is allowed to vary from one snippet to the other . - Since there will always be some noise in your retrieval , increasing the top_k increases the chance to get relevant elements in your retrieved snippets . 🎯 Shooting more arrows increases your probability of hitting your target . - Meanwhile , the summed length of your retrieved documents should not be too high : for instance , for most current models 16k tokens will probably drown your Reader model in information due to Lost - in - the - middle phenomenon . 🎯 Give your reader model only the most relevant insights , not a huge pile of books ! In this notebook , we use Langchain library since it offers a huge variety of options for vector databases and allows</code>                                                                        | <code>1.0</code> |
+  | <code>How do you ensure consistency in outputs?</code> | <code>, context , response , and combine these with LLM calls . These evaluation modules are in the following forms : - Correctness : Whether the generated answer matches that of the reference answer given the query ( requires labels ) . - Semantic Similarity Whether the predicted answer is semantically similar to the reference answer ( requires labels ) . - Faithfulness : Evaluates if the answer is faithful to the retrieved contexts ( in other words , whether if there ’ s hallucination ) . - Context Relevancy : Whether retrieved context is relevant to the query . - Answer Relevancy : Whether the generated answer is relevant to the query . - Guideline Adherence : Whether the predicted answer adheres to specific guidelines . Question Generation Section titled “ Question Generation ” In addition to evaluating queries</code> | <code>1.0</code> |
 * Loss: [<code>BinaryCrossEntropyLoss</code>](https://sbert.net/docs/package_reference/cross_encoder/losses.html#binarycrossentropyloss) with these parameters:
   ```json
   {
@@ -208,13 +208,14 @@ You can finetune this model on your own dataset.
 ### Training Hyperparameters
 #### Non-Default Hyperparameters
 
-- `num_train_epochs`: 4
+- `per_device_train_batch_size`: 12
+- `per_device_eval_batch_size`: 12
 
 #### All Hyperparameters
 <details><summary>Click to expand</summary>
 
-- `per_device_train_batch_size`: 8
-- `num_train_epochs`: 4
+- `per_device_train_batch_size`: 12
+- `num_train_epochs`: 3
 - `max_steps`: -1
 - `learning_rate`: 5e-05
 - `lr_scheduler_type`: linear
@@ -255,7 +256,7 @@ You can finetune this model on your own dataset.
 - `disable_tqdm`: False
 - `project`: huggingface
 - `trackio_space_id`: trackio
-- `per_device_eval_batch_size`: 8
+- `per_device_eval_batch_size`: 12
 - `prediction_loss_only`: True
 - `eval_on_start`: False
 - `eval_do_concat_batches`: True
@@ -315,14 +316,13 @@ You can finetune this model on your own dataset.
 ### Training Logs
 | Epoch | Step | failure-driven-val_average_precision |
 |:-----:|:----:|:------------------------------------:|
-| 1.0   | 75   | 0.4463                               |
-| 2.0   | 150  | 0.7257                               |
-| 3.0   | 225  | 0.7321                               |
-| 4.0   | 300  | 0.7321                               |
+| 1.0   | 46   | 0.4485                               |
+| 2.0   | 92   | 0.5706                               |
+| 3.0   | 138  | 0.9100                               |
 
 
 ### Training Time
-- **Training**: 18.2 seconds
+- **Training**: 6.0 seconds
 
 ### Framework Versions
 - Python: 3.12.3

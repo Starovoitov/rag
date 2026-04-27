@@ -55,6 +55,15 @@ def _paraphrase_variants(base: str) -> list[str]:
 def _decomposition_variants(base: str) -> list[str]:
     lowered = base.lower().strip().rstrip("?")
     variants: list[str] = []
+    if "context stuffing" in lowered:
+        variants.extend(
+            [
+                "what does context stuffing mean in rag",
+                "what is adding too much context in llm prompts",
+                "what is overloading context window rag",
+                "problems with too much retrieved context",
+            ]
+        )
     if "why" in lowered and "recall" in lowered:
         variants.extend(
             [
@@ -90,6 +99,15 @@ def _entity_concept_variants(base: str) -> list[str]:
     lowered = base.lower()
     variants: list[str] = []
     concept_map = (
+        (
+            "context stuffing",
+            [
+                "adding too much context",
+                "overloading prompt context window",
+                "excessive retrieval in rag",
+                "context overload reduces answer quality",
+            ],
+        ),
         ("evaluation", ["faithfulness", "groundedness", "answer relevance", "retrieval quality metrics"]),
         ("metrics", ["mrr ndcg recall at k", "ranking quality diagnostics"]),
         ("recall", ["retrieval coverage", "candidate pool expansion", "bm25 dense recall tradeoff"]),
@@ -1166,6 +1184,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 alpha=args.rerank_alpha,
                 ce_calibration=args.ce_calibration,
                 ce_temperature=args.ce_temperature,
+                top1_margin_lambda=args.rerank_top1_margin_lambda,
             )
             retrieved = [item.doc_id for item in reranked]
         else:
@@ -1237,6 +1256,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         "retriever": args.retriever,
         "rerank_enabled": args.rerank,
         "rerank_alpha": args.rerank_alpha if args.rerank else None,
+        "rerank_top1_margin_lambda": args.rerank_top1_margin_lambda if args.rerank else None,
         "two_stage_rerank_enabled": args.two_stage_rerank,
         "reranker_model": args.reranker_model if args.rerank else None,
         "stratified_rerank_pool_enabled": args.stratified_rerank_pool,
@@ -1443,6 +1463,7 @@ def cmd_reranker_pipeline(args: argparse.Namespace) -> None:
         reranker_model=args.reranker_model,
         rerank_candidates=40,
         rerank_alpha=0.45,
+        rerank_top1_margin_lambda=args.rerank_top1_margin_lambda,
         ce_calibration="zscore",
         ce_temperature=1.0,
         stratified_rerank_pool=True,
@@ -1710,6 +1731,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_cmd.add_argument("--rerank-candidates", type=int, default=20)
     eval_cmd.add_argument("--rerank-alpha", type=float, default=0.75)
     eval_cmd.add_argument(
+        "--rerank-top1-margin-lambda",
+        type=float,
+        default=0.0,
+        help="Post-process top-1 score with lambda * (top1 - top2).",
+    )
+    eval_cmd.add_argument(
         "--ce-calibration",
         choices=("minmax", "softmax", "zscore"),
         default="minmax",
@@ -1862,9 +1889,15 @@ def build_parser() -> argparse.ArgumentParser:
     rerank_pipeline_cmd.add_argument("--dataset", default="data/evaluation_with_evidence.jsonl")
     rerank_pipeline_cmd.add_argument("--rag-dataset", default="data/rag_dataset.jsonl")
     rerank_pipeline_cmd.add_argument("--faiss-path", default="data/faiss")
-    rerank_pipeline_cmd.add_argument("--index", default="faiss")
+    rerank_pipeline_cmd.add_argument("--index", default=".")
     rerank_pipeline_cmd.add_argument("--embedding-model", default="intfloat/e5-base-v2")
     rerank_pipeline_cmd.add_argument("--reranker-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    rerank_pipeline_cmd.add_argument(
+        "--rerank-top1-margin-lambda",
+        type=float,
+        default=0.0,
+        help="Post-process top-1 score with lambda * (top1 - top2).",
+    )
     rerank_pipeline_cmd.add_argument("--k-values", default="1,10,20")
     rerank_pipeline_cmd.add_argument("--multi-query-llm-expansion", action="store_true")
     rerank_pipeline_cmd.add_argument("--multi-query-llm-provider", default="qwen")

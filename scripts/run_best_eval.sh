@@ -13,7 +13,7 @@ FAISS_PATH="${FAISS_PATH:-data/faiss}"
 FAISS_INDEX_NAME="${FAISS_INDEX_NAME:-.}"
 RERANKER_MODEL="${RERANKER_MODEL:-artifacts/models/reranker-failure-driven}"
 if [[ ! -d "$RERANKER_MODEL" ]]; then
-  RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-12-v2"
+  RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
 fi
 
 # BEST / STABLE CONFIG (source of truth)
@@ -59,27 +59,29 @@ python main.py build_evaluation_dataset \
   --out data/evaluation_with_evidence.jsonl \
   --fuzzy-ratio 0.80 \
   --lexical-min-hits 1 \
-  --max-chunk-ids 3 \
+  --max-chunk-ids 4 \
   --max-gt-url-share 0.27 \
   --target-multi-gt-share 0.30 \
-  --keep-max-ids-for-multi 2
+  --keep-max-ids-for-multi 3
 
 python main.py evaluation_runner \
   --dataset data/evaluation_with_evidence.jsonl \
   --retriever hybrid \
-  --k-values 1,3,5,10,20 \
-  --alpha 0.65 \
+  --k-values 1,3,5,10,20,30 \
+  --alpha 0.60 \
   --rerank \
   --rag-dataset data/rag_dataset.jsonl \
   --faiss-path "$FAISS_PATH" \
   --index "$FAISS_INDEX_NAME" \
   --embedding-model "$EMBEDDING_MODEL" \
   --reranker-model "$RERANKER_MODEL" \
-  --rerank-semantic-weight 0.75 \
-  --rerank-bm25-weight 0.25 \
-  --rerank-candidates 80 \
-  --rerank-alpha 0.4 \
-  --ce-calibration softmax \
+  --rerank-semantic-weight 0.60 \
+  --rerank-bm25-weight 0.35 \
+  --rerank-candidates 200 \
+  --rerank-alpha 0.30 \
+  --rerank-top1-margin-lambda 0.65 \
+  --two-stage-rerank \
+  --ce-calibration zscore \
   --ce-temperature 0.7 \
   --hybrid-candidate-multiplier 100 \
   --hybrid-rrf-k 80 \
@@ -92,10 +94,9 @@ python main.py evaluation_runner \
   --soft-recall-rescue-tail-k 30 \
   --soft-recall-rescue-bm25-depth 300 \
   --mmr-before-rerank \
-  --mmr-lambda 0.82 \
+  --mmr-lambda 0.78 \
   --mmr-k 35 \
   --require-evidence \
-  --two-stage-rerank \
   --out-json experiments/results/retrieval_report_best.json
 
 python main.py dataset_audit \
