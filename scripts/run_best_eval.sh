@@ -68,34 +68,23 @@ python main.py evaluation_runner \
   --dataset data/evaluation_with_evidence.jsonl \
   --retriever hybrid \
   --k-values 1,3,5,10,20,30 \
-  --alpha 0.60 \
-  --rerank \
+  --alpha 0.65 \
   --rag-dataset data/rag_dataset.jsonl \
   --faiss-path "$FAISS_PATH" \
   --index "$FAISS_INDEX_NAME" \
   --embedding-model "$EMBEDDING_MODEL" \
-  --reranker-model "$RERANKER_MODEL" \
-  --rerank-semantic-weight 0.60 \
-  --rerank-bm25-weight 0.35 \
-  --rerank-candidates 200 \
-  --rerank-alpha 0.30 \
-  --rerank-top1-margin-lambda 0.65 \
-  --two-stage-rerank \
   --ce-calibration zscore \
-  --ce-temperature 0.7 \
+  --ce-temperature 1.0 \
   --hybrid-candidate-multiplier 100 \
   --hybrid-rrf-k 80 \
-  --multi-query \
-  --multi-query-variants 3 \
-  --multi-query-rrf-k 60 \
-  --stratified-rerank-pool \
-  --hard-negative-semantic-floor 0.12 \
+  --rerank \
+  --rerank-candidates 120 \
+  --rerank-alpha 0.30 \
+  --rerank-semantic-weight 0.70 \
+  --rerank-bm25-weight 0.30 \
   --soft-recall-rescue \
   --soft-recall-rescue-tail-k 30 \
   --soft-recall-rescue-bm25-depth 300 \
-  --mmr-before-rerank \
-  --mmr-lambda 0.78 \
-  --mmr-k 35 \
   --require-evidence \
   --out-json experiments/results/retrieval_report_best.json
 
