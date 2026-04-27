@@ -82,6 +82,7 @@ python main.py evaluation_runner \
   --rerank-alpha 0.30 \
   --rerank-semantic-weight 0.70 \
   --rerank-bm25-weight 0.30 \
+  --reranker-model "models/reranker-failure-driven" \
   --soft-recall-rescue \
   --soft-recall-rescue-tail-k 30 \
   --soft-recall-rescue-bm25-depth 300 \
