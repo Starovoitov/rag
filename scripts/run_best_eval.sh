@@ -23,20 +23,16 @@ fi
 # - min-output-chunk-tokens=60, max-output-chunk-tokens=750
 # - max-chunks-per-url=10, max-chunks-per-category=45
 # Evaluation dataset:
-# - fuzzy-ratio=0.80, lexical-min-hits=1, max-chunk-ids=3
+# - fuzzy-ratio=0.80, lexical-min-hits=1, max-chunk-ids=4
 # - max-gt-url-share=0.27, target-multi-gt-share=0.30
-# - keep-max-ids-for-multi=2
+# - keep-max-ids-for-multi=3
 # Retrieval / rerank:
-# - retriever=hybrid, k-values=1,3,5,10,20, alpha=0.65, require-evidence=true
-# - rerank=true, rerank-candidates=150, rerank-alpha=0.35
+# - retriever=hybrid, k-values=1,3,5,10,20,30, alpha=0.65
+# - rerank=true, reranker-model=models/reranker-failure-driven
+# - rerank-candidates=120, rerank-alpha=0.30
 # - ce-calibration=zscore, ce-temperature=1.0
 # - hybrid-candidate-multiplier=100, hybrid-rrf-k=80
-# - multi-query=true, variants=3, multi-query-rrf-k=60
-# - stratified-rerank-pool=true, hard-negative-semantic-floor=0.12
-# - rerank prior weights: semantic=0.75, bm25=0.25
-# - soft-recall-rescue=true, tail-k=30, bm25-depth=300
-# - mmr-before-rerank=true, mmr-lambda=0.82, mmr-k=35
-# - require-evidence=true, two-stage-rerank=true
+# - rerank prior weights: semantic=0.70, bm25=0.30
 
 python main.py cleanup_faiss --faiss-path "$FAISS_PATH" --drop-persist-directory
 
@@ -83,10 +79,6 @@ python main.py evaluation_runner \
   --rerank-semantic-weight 0.70 \
   --rerank-bm25-weight 0.30 \
   --reranker-model "models/reranker-failure-driven" \
-  --soft-recall-rescue \
-  --soft-recall-rescue-tail-k 30 \
-  --soft-recall-rescue-bm25-depth 300 \
-  --require-evidence \
   --out-json experiments/results/retrieval_report_best.json
 
 python main.py dataset_audit \

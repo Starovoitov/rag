@@ -216,3 +216,19 @@ Recommended full loop:
 python main.py reranker_pipeline --train-reranker
 ```
 
+---
+
+## Documentation Map
+
+- `README.md`  
+  Project quickstart and current "best/stable" execution flow.
+
+- `docs/features-catalog.md`  
+  Full feature inventory by category (commands, FAISS management, caching, reranking, logging, artifacts).
+
+- `docs/project-handbook-legacy.md`  
+  Legacy root README content preserved for historical reference.
+
+- `scripts/run_best_eval.sh`  
+  Reproducible stable pipeline script used as the source-of-truth run for benchmark outputs.
+
