@@ -7,6 +7,12 @@ from caching.lru_ttl_cache import LRUTTLCache
 
 
 class TestLRUTTLCache(unittest.TestCase):
+    def test_init_validation(self) -> None:
+        with self.assertRaises(ValueError):
+            LRUTTLCache[int, int](capacity=0, ttl_seconds=1.0)
+        with self.assertRaises(ValueError):
+            LRUTTLCache[int, int](capacity=1, ttl_seconds=0.0)
+
     def test_lru_eviction(self) -> None:
         cache = LRUTTLCache[str, int](capacity=2, ttl_seconds=10.0)
         cache.set("a", 1)
@@ -49,6 +55,29 @@ class TestLRUTTLCache(unittest.TestCase):
         removed = cache.cleanup_expired()
         self.assertEqual(removed, 2)
         self.assertEqual(len(cache), 0)
+
+    def test_set_custom_ttl_validation(self) -> None:
+        cache = LRUTTLCache[str, int](capacity=2, ttl_seconds=10.0)
+        with self.assertRaises(ValueError):
+            cache.set("a", 1, ttl_seconds=0.0)
+
+    def test_get_entry_metadata_and_clear(self) -> None:
+        cache = LRUTTLCache[str, int](capacity=2, ttl_seconds=10.0)
+        cache.set("k", 7)
+        meta = cache.get_entry_metadata("k")
+        self.assertIsNotNone(meta)
+        assert meta is not None
+        self.assertEqual(meta["key"], "k")
+        cache.clear()
+        self.assertEqual(len(cache), 0)
+
+    def test_stats_tracks_evictions(self) -> None:
+        cache = LRUTTLCache[str, int](capacity=1, ttl_seconds=10.0)
+        cache.set("a", 1)
+        cache.set("b", 2)
+        stats = cache.stats()
+        self.assertEqual(stats.evicted_lru, 1)
+        self.assertEqual(stats.size, 1)
 
 
 if __name__ == "__main__":
