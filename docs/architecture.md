@@ -459,8 +459,8 @@ flowchart TD
 - `docs/features-catalog.md`  
   Full feature inventory by category (commands, FAISS management, caching, reranking, logging, artifacts).
 
-- `docs/project-handbook-legacy.md`  
-  Legacy root README content preserved for historical reference.
+- `docs/handbook.md`  
+  Primary command handbook with practical variants, including evaluation runner modes.
 
 - `scripts/run_best_eval.sh`  
   Reproducible stable pipeline script used as the source-of-truth run for benchmark outputs.

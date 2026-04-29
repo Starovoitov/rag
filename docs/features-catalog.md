@@ -91,13 +91,14 @@ This document lists core project features by category with short practical descr
 - Filtering criterion at scoring time:
   - optional `--require-evidence` to score only samples with non-empty `expected_evidence.chunk_ids`
 - Retrieval quality formulas (project metrics implementation):
-## recall@k = |top_k(retrieved_doc_ids) intersection relevant_doc_ids| / |relevant_doc_ids|
-## precision@k = relevant_hits_in_top_k / |top_k(retrieved_doc_ids)|
-## hit_rate@k = 1.0 if any relevant doc appears in top_k, else 0.0
-## reciprocal_rank = 1 / rank(first_relevant_doc), else 0.0 if no relevant doc retrieved
-## mrr = mean(reciprocal_rank over all queries)
-## dcg@k = sum over rank i in top_k of ((2^rel_i - 1) / log2(i + 1))
-## ndcg@k = dcg@k / idcg@k
+  - For a query with `TopK` and `Relevant`:
+  - Recall@k: $$\frac{|TopK \cap Relevant|}{|Relevant|}$$
+  - Precision@k: $$\frac{|TopK \cap Relevant|}{k}$$
+  - HitRate@k: $$\mathbb{1}[TopK \cap Relevant \neq \emptyset]$$
+  - Reciprocal Rank: $$RR = \frac{1}{\text{rank of first relevant}}$$
+  - MRR: average of RR across queries.
+  - DCG@k: $$\sum_{i=1}^{k}\frac{2^{rel_i}-1}{\log_2(i+1)}$$
+  - NDCG@k: $$\frac{DCG@k}{IDCG@k}$$
 - Aggregation rule:
   - each metric is computed per query and then averaged across the evaluated sample set.
 - JSON report export via `--out-json` includes metrics, sample counts, filtering stats, and per-query runs.
