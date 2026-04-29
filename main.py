@@ -3,19 +3,28 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 from collections import Counter
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from reranking.failure_driven import (
+    build_reranker_training_contexts_from_failures,
+    build_stratified_rerank_pool,
+    classify_failure,
+    inject_bm25_tail_candidates,
+    mmr_select_candidates,
+    prefilter_rerank_candidates,
+    rrf_fuse_doc_ids,
+    source_miss_type,
+    train_reranker_from_contexts_jsonl,
+)
 from utils.cli_config import (
     apply_config_defaults,
     load_cli_defaults,
     validate_required_command_params,
 )
-from utils.common import min_max_normalize, rank_weight, tokenize
+from utils.common import min_max_normalize
 from utils.logger import configure_runtime_logger
 from utils.query_manipulation import (
     build_query_variants_with_debug,
@@ -23,7 +32,7 @@ from utils.query_manipulation import (
 )
 
 if TYPE_CHECKING:
-    from reranking.cross_encoder import RerankCandidate
+    pass
 
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/e5-base-v2"
@@ -33,548 +42,6 @@ REQUIRED_COMMAND_PARAMS: dict[str, tuple[str, ...]] = {
     "run_rag": ("question",),
     "run_experiments": ("question",),
 }
-
-
-def _rrf_fuse_doc_ids(ranked_lists: list[list[str]], top_k: int, rrf_k: int = 60) -> list[str]:
-    if top_k <= 0:
-        return []
-    scores: dict[str, float] = {}
-    for ranked in ranked_lists:
-        for rank, doc_id in enumerate(ranked, start=1):
-            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (rrf_k + rank)
-    ordered = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-    return [doc_id for doc_id, _ in ordered[:top_k]]
-
-
-def _prefilter_rerank_candidates(
-    query: str,
-    candidates: list[RerankCandidate],
-    keep_top_n: int,
-) -> list[RerankCandidate]:
-    if keep_top_n <= 0 or len(candidates) <= keep_top_n:
-        return candidates
-
-    query_terms = set(tokenize(query, for_bm25=True))
-    if not query_terms:
-        return candidates[:keep_top_n]
-
-    ranked: list[tuple[float, int, RerankCandidate]] = []
-    for idx, candidate in enumerate(candidates):
-        doc_terms = set(tokenize(candidate.text, for_bm25=True))
-        overlap = len(query_terms & doc_terms)
-        # Strongly prioritize lexical overlap, with a tiny bias to earlier base rank.
-        score = float(overlap) + (1.0 / (idx + 1000.0))
-        ranked.append((score, idx, candidate))
-
-    ranked.sort(key=lambda item: (item[0], -item[1]), reverse=True)
-    return [candidate for _, _, candidate in ranked[:keep_top_n]]
-
-
-def _candidate_base_score(query: str, text: str, rank: int) -> float:
-    query_terms = set(tokenize(query, for_bm25=True))
-    doc_terms = set(tokenize(text, for_bm25=True))
-    overlap = len(query_terms & doc_terms)
-    return (1.0 / (60.0 + rank)) + (0.02 * overlap)
-
-
-_FAILURE_ANALYSIS_STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "how",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "that",
-    "the",
-    "this",
-    "to",
-    "was",
-    "what",
-    "when",
-    "where",
-    "which",
-    "who",
-    "why",
-    "with",
-}
-
-
-def _content_tokens(text: str) -> set[str]:
-    return {
-        token
-        for token in tokenize(text, for_bm25=True)
-        if len(token) >= 3 and token not in _FAILURE_ANALYSIS_STOPWORDS
-    }
-
-
-def _text_similarity(left: str, right: str) -> float:
-    left_tokens = _content_tokens(left)
-    right_tokens = _content_tokens(right)
-    lexical = 0.0
-    if left_tokens and right_tokens:
-        lexical = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
-    seq = SequenceMatcher(None, left.lower(), right.lower()).ratio()
-    return max(lexical, seq)
-
-
-def _single_chunk_overlap_ratio(gt_text: str, retrieved_text: str) -> float:
-    gt_tokens = _content_tokens(gt_text)
-    if not gt_tokens:
-        return 0.0
-    overlap = len(gt_tokens & _content_tokens(retrieved_text))
-    return overlap / len(gt_tokens)
-
-
-def _classify_failure(
-    *,
-    query: str,
-    gt_doc_ids: list[str],
-    top_k_doc_ids: list[str],
-    all_ranked_doc_ids: list[str],
-    doc_text_map: dict[str, str],
-    near_miss_threshold: float,
-    top_k: int,
-) -> tuple[str, dict[str, object]]:
-    gt_texts = [
-        doc_text_map.get(doc_id, "") for doc_id in gt_doc_ids if doc_text_map.get(doc_id, "")
-    ]
-    retrieved_texts = [
-        doc_text_map.get(doc_id, "") for doc_id in top_k_doc_ids if doc_text_map.get(doc_id, "")
-    ]
-
-    near_miss_score = 0.0
-    for gt_text in gt_texts:
-        for hit_text in retrieved_texts:
-            near_miss_score = max(near_miss_score, _text_similarity(gt_text, hit_text))
-    if near_miss_score >= near_miss_threshold:
-        return "near_miss", {"near_miss_score": near_miss_score}
-
-    best_single_overlap = 0.0
-    combined_overlap = 0.0
-    if gt_texts and retrieved_texts:
-        top_window = retrieved_texts[: min(3, len(retrieved_texts))]
-        combined_tokens = _content_tokens(" ".join(top_window))
-        for gt_text in gt_texts:
-            gt_tokens = _content_tokens(gt_text)
-            if not gt_tokens:
-                continue
-            for hit_text in retrieved_texts:
-                best_single_overlap = max(
-                    best_single_overlap, _single_chunk_overlap_ratio(gt_text, hit_text)
-                )
-            combined_overlap = max(
-                combined_overlap, len(gt_tokens & combined_tokens) / len(gt_tokens)
-            )
-    if combined_overlap >= 0.75 and best_single_overlap < 0.55:
-        return "fragmentation", {
-            "combined_overlap": combined_overlap,
-            "best_single_overlap": best_single_overlap,
-        }
-
-    gt_rank = None
-    for rank, doc_id in enumerate(all_ranked_doc_ids, start=1):
-        if doc_id in gt_doc_ids:
-            gt_rank = rank
-            break
-    if gt_rank is not None and gt_rank > top_k:
-        return "ranking_cutoff_failure", {"gt_first_rank": gt_rank, "top_k": top_k}
-
-    query_tokens = _content_tokens(query)
-    best_query_overlap = 0.0
-    for gt_text in gt_texts:
-        gt_tokens = _content_tokens(gt_text)
-        if not gt_tokens or not query_tokens:
-            continue
-        best_query_overlap = max(
-            best_query_overlap, len(query_tokens & gt_tokens) / len(query_tokens)
-        )
-
-    return "true_recall_failure", {"best_query_to_gt_overlap": best_query_overlap}
-
-
-def _inject_bm25_tail_candidates(
-    *,
-    query: str,
-    merged_doc_ids: list[str],
-    retriever: object,
-    bm25_search_depth: int,
-    rescue_tail_k: int,
-) -> list[str]:
-    if rescue_tail_k <= 0 or bm25_search_depth <= 0:
-        return merged_doc_ids
-    bm25 = getattr(retriever, "bm25", None)
-    index = getattr(bm25, "index", None)
-    if index is None:
-        return merged_doc_ids
-
-    bm25_hits = index.search(query, top_k=bm25_search_depth)
-    merged_set = set(merged_doc_ids)
-    rescued = [item.doc_id for item in bm25_hits if item.doc_id not in merged_set][:rescue_tail_k]
-    if not rescued:
-        return merged_doc_ids
-    return merged_doc_ids + rescued
-
-
-def _interleave_doc_ids(primary: list[str], secondary: list[str], limit: int) -> list[str]:
-    merged: list[str] = []
-    seen: set[str] = set()
-    max_len = max(len(primary), len(secondary))
-    for idx in range(max_len):
-        if idx < len(primary):
-            doc_id = primary[idx]
-            if doc_id not in seen:
-                merged.append(doc_id)
-                seen.add(doc_id)
-                if len(merged) >= limit:
-                    return merged
-        if idx < len(secondary):
-            doc_id = secondary[idx]
-            if doc_id not in seen:
-                merged.append(doc_id)
-                seen.add(doc_id)
-                if len(merged) >= limit:
-                    return merged
-    return merged
-
-
-def _build_stratified_rerank_pool(
-    *,
-    hybrid_doc_ids: list[str],
-    semantic_doc_ids: list[str] | None,
-    bm25_doc_ids: list[str] | None,
-    limit: int,
-) -> list[str]:
-    sem = semantic_doc_ids or []
-    bm = bm25_doc_ids or []
-    stratified = _interleave_doc_ids(sem, bm, limit=max(limit * 2, 1))
-    merged: list[str] = []
-    seen: set[str] = set()
-    for doc_id in stratified + hybrid_doc_ids + sem + bm:
-        if doc_id in seen:
-            continue
-        seen.add(doc_id)
-        merged.append(doc_id)
-        if len(merged) >= limit:
-            break
-    return merged
-
-
-def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    if len(vec_a) != len(vec_b) or not vec_a:
-        return 0.0
-    dot = sum(a * b for a, b in zip(vec_a, vec_b, strict=True))
-    norm_a = sum(a * a for a in vec_a) ** 0.5
-    norm_b = sum(b * b for b in vec_b) ** 0.5
-    if norm_a <= 1e-12 or norm_b <= 1e-12:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-def _mmr_select_candidates(
-    *,
-    candidate_doc_ids: list[str],
-    query_embedding: list[float],
-    doc_embeddings: dict[str, list[float]],
-    lambda_: float,
-    max_k: int,
-    diversity_threshold: float | None,
-) -> list[str]:
-    if max_k <= 0:
-        return []
-    seen: set[str] = set()
-    candidates = [
-        doc_id for doc_id in candidate_doc_ids if doc_id not in seen and not seen.add(doc_id)
-    ]
-    if not candidates:
-        return []
-
-    # Keep candidate order for docs without embeddings.
-    candidates_with_vec = [doc_id for doc_id in candidates if doc_id in doc_embeddings]
-    candidates_without_vec = [doc_id for doc_id in candidates if doc_id not in doc_embeddings]
-    if not candidates_with_vec:
-        return candidates[:max_k]
-
-    q_scores = {
-        doc_id: _cosine_similarity(query_embedding, doc_embeddings[doc_id])
-        for doc_id in candidates_with_vec
-    }
-    selected: list[str] = []
-    remaining = list(candidates_with_vec)
-
-    while remaining and len(selected) < max_k:
-        best_doc_id = None
-        best_score = float("-inf")
-        for doc_id in remaining:
-            relevance = q_scores.get(doc_id, 0.0)
-            if not selected:
-                mmr_score = relevance
-                max_sim_to_selected = 0.0
-            else:
-                max_sim_to_selected = max(
-                    _cosine_similarity(doc_embeddings[doc_id], doc_embeddings[selected_doc])
-                    for selected_doc in selected
-                )
-                mmr_score = (lambda_ * relevance) - ((1.0 - lambda_) * max_sim_to_selected)
-
-            if (
-                diversity_threshold is not None
-                and selected
-                and max_sim_to_selected >= diversity_threshold
-            ):
-                continue
-            if mmr_score > best_score:
-                best_score = mmr_score
-                best_doc_id = doc_id
-
-        if best_doc_id is None:
-            break
-        selected.append(best_doc_id)
-        remaining.remove(best_doc_id)
-
-    # Backfill with non-embedded docs and skipped docs to keep pool size stable.
-    if len(selected) < max_k:
-        for doc_id in candidates_without_vec + remaining:
-            if doc_id not in selected:
-                selected.append(doc_id)
-                if len(selected) >= max_k:
-                    break
-    return selected[:max_k]
-
-
-def _source_miss_type(
-    *,
-    relevant_doc_ids: list[str],
-    semantic_doc_ids: list[str] | None,
-    bm25_doc_ids: list[str] | None,
-) -> str:
-    relevant = set(relevant_doc_ids)
-    if not relevant:
-        return "no_gt"
-    semantic_hits = bool(set(semantic_doc_ids or []).intersection(relevant))
-    bm25_hits = bool(set(bm25_doc_ids or []).intersection(relevant))
-    if not semantic_hits and not bm25_hits:
-        return "both_miss"
-    if not semantic_hits and bm25_hits:
-        return "embedding_miss"
-    if semantic_hits and not bm25_hits:
-        return "bm25_miss"
-    return "both_hit"
-
-
-def _build_reranker_training_contexts_from_failures(
-    *,
-    failure_records: list[dict[str, object]],
-    doc_text_map: dict[str, str],
-    max_negative_rank: int,
-    max_negatives: int,
-    ranking_cutoff_weight: float,
-    true_recall_weight: float,
-    default_weight: float,
-) -> tuple[list[dict[str, object]], dict[str, int]]:
-    contexts: list[dict[str, object]] = []
-    stats = {
-        "samples_seen": 0,
-        "samples_used": 0,
-        "contexts_written": 0,
-        "contexts_ranking_cutoff_failure": 0,
-        "contexts_true_recall_failure": 0,
-        "contexts_other": 0,
-        "missing_positive_text": 0,
-        "missing_negative_text": 0,
-    }
-    for sample in failure_records:
-        stats["samples_seen"] += 1
-        query = str(sample.get("query", "")).strip()
-        bucket = str(sample.get("bucket", ""))
-        source_miss_type = str(sample.get("source_miss_type", ""))
-        positives = [str(doc_id) for doc_id in sample.get("relevant_doc_ids", [])]
-        retrieved = [str(doc_id) for doc_id in sample.get("retrieved_top_k_doc_ids", [])]
-        retrieved_full = [str(doc_id) for doc_id in sample.get("retrieved_full_doc_ids", [])]
-        bm25_branch = [str(doc_id) for doc_id in sample.get("bm25_branch_doc_ids", [])]
-        if not query or not positives or not retrieved:
-            continue
-        stats["samples_used"] += 1
-
-        if bucket == "ranking_cutoff_failure":
-            sample_weight = ranking_cutoff_weight
-        elif bucket == "true_recall_failure":
-            sample_weight = true_recall_weight
-        else:
-            sample_weight = default_weight
-
-        positive_ids: list[str] = []
-        for positive_id in positives:
-            if positive_id not in doc_text_map:
-                stats["missing_positive_text"] += 1
-                continue
-            positive_ids.append(positive_id)
-
-        if bucket == "ranking_cutoff_failure":
-            negative_pool = retrieved[:max_negative_rank]
-        elif bucket == "true_recall_failure":
-            # True recall failures are mostly retrieval-side; prefer BM25 expansion as auxiliary signal.
-            negative_pool = (bm25_branch or retrieved_full or retrieved)[:max_negative_rank]
-        else:
-            negative_pool = retrieved[:max_negative_rank]
-
-        negative_ids: list[str] = []
-        negative_weights: dict[str, float] = {}
-        positive_set = set(positive_ids)
-        for rank, negative_id in enumerate(negative_pool, start=1):
-            if len(negative_ids) >= max_negatives:
-                break
-            if negative_id in positive_set:
-                continue
-            if negative_id not in doc_text_map:
-                stats["missing_negative_text"] += 1
-                continue
-            if negative_id in negative_weights:
-                continue
-            negative_ids.append(negative_id)
-            negative_weights[negative_id] = sample_weight * rank_weight(rank)
-
-        # Source-miss signal is useful for hard-negative enrichment only.
-        if (
-            source_miss_type in {"embedding_miss", "bm25_miss"}
-            and len(negative_ids) < max_negatives
-        ):
-            for rank, negative_id in enumerate(retrieved_full, start=len(negative_ids) + 1):
-                if len(negative_ids) >= max_negatives:
-                    break
-                if negative_id in positive_set or negative_id in negative_weights:
-                    continue
-                if negative_id not in doc_text_map:
-                    continue
-                negative_ids.append(negative_id)
-                negative_weights[negative_id] = sample_weight * rank_weight(rank)
-
-        if not positive_ids or not negative_ids:
-            continue
-        contexts.append(
-            {
-                "schema_version": "reranker_context_v1",
-                "query": query,
-                "positives": positive_ids,
-                "negatives": negative_ids,
-                "weights": negative_weights,
-                "failure_bucket": bucket,
-                "source_miss_type": source_miss_type,
-            }
-        )
-        stats["contexts_written"] += 1
-        if bucket == "ranking_cutoff_failure":
-            stats["contexts_ranking_cutoff_failure"] += 1
-        elif bucket == "true_recall_failure":
-            stats["contexts_true_recall_failure"] += 1
-        else:
-            stats["contexts_other"] += 1
-    return contexts, stats
-
-
-def _train_reranker_from_contexts_jsonl(
-    *,
-    train_jsonl: Path,
-    doc_text_map: dict[str, str],
-    model_name: str,
-    out_dir: Path,
-    epochs: int,
-    batch_size: int,
-    warmup_steps: int,
-    val_ratio: float,
-    seed: int,
-) -> dict[str, object]:
-    # Heavy training deps are imported lazily for non-training commands.
-    from sentence_transformers import InputExample
-    from sentence_transformers.cross_encoder import CrossEncoder
-    from sentence_transformers.cross_encoder.evaluation import CEBinaryClassificationEvaluator
-    from torch.utils.data import DataLoader
-
-    rows = [
-        json.loads(line)
-        for line in train_jsonl.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    random.Random(seed).shuffle(rows)
-
-    examples: list[InputExample] = []
-    for row in rows:
-        query = str(row.get("query", "")).strip()
-        if row.get("schema_version") == "reranker_context_v1":
-            positives = [str(doc_id) for doc_id in row.get("positives", [])]
-            negatives = [str(doc_id) for doc_id in row.get("negatives", [])]
-            weights = row.get("weights", {}) or {}
-            for positive_id in positives:
-                positive_text = doc_text_map.get(positive_id, "").strip()
-                if not query or not positive_text:
-                    continue
-                for negative_id in negatives:
-                    negative_text = doc_text_map.get(negative_id, "").strip()
-                    if not negative_text:
-                        continue
-                    sample_weight = float(weights.get(negative_id, 1.0))
-                    repeats = max(1, int(round(sample_weight)))
-                    for _ in range(repeats):
-                        examples.append(InputExample(texts=[query, positive_text], label=1.0))
-                        examples.append(InputExample(texts=[query, negative_text], label=0.0))
-            continue
-        if "positive_text" in row and "negative_text" in row:
-            positive_text = str(row.get("positive_text", "")).strip()
-            negative_text = str(row.get("negative_text", "")).strip()
-            sample_weight = float(row.get("sample_weight", 1.0))
-            if not query or not positive_text or not negative_text:
-                continue
-            repeats = max(1, int(round(sample_weight)))
-            for _ in range(repeats):
-                examples.append(InputExample(texts=[query, positive_text], label=1.0))
-                examples.append(InputExample(texts=[query, negative_text], label=0.0))
-
-    if not examples:
-        raise ValueError("No train examples built from reranker JSONL.")
-
-    val_size = int(len(examples) * max(0.0, min(val_ratio, 0.5)))
-    val_examples = examples[:val_size]
-    train_examples = examples[val_size:]
-    if not train_examples:
-        raise ValueError("No train split left after validation split.")
-
-    model = CrossEncoder(model_name, num_labels=1, max_length=512)
-    train_loader = DataLoader(train_examples, shuffle=True, batch_size=batch_size)
-    evaluator = None
-    if val_examples:
-        evaluator = CEBinaryClassificationEvaluator.from_input_examples(
-            val_examples, name="failure-driven-val"
-        )
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    model.fit(
-        train_dataloader=train_loader,
-        evaluator=evaluator,
-        epochs=epochs,
-        warmup_steps=warmup_steps,
-        output_path=str(out_dir),
-        show_progress_bar=True,
-    )
-    # Ensure a loadable model exists at output path for subsequent evaluation.
-    model.save(str(out_dir))
-    return {
-        "out_dir": str(out_dir),
-        "model": model_name,
-        "train_examples": len(train_examples),
-        "val_examples": len(val_examples),
-        "epochs": epochs,
-        "batch_size": batch_size,
-    }
 
 
 def cmd_build_parser(args: argparse.Namespace) -> None:
@@ -798,21 +265,21 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             per_query_results = [
                 retriever.search(query, top_k=retrieve_k) for query in query_variants if query
             ]
-            retrieved = _rrf_fuse_doc_ids(
+            retrieved = rrf_fuse_doc_ids(
                 per_query_results, top_k=retrieve_k, rrf_k=args.multi_query_rrf_k
             )
         else:
             retrieved = retriever.search(sample.query, top_k=retrieve_k)
         if reranker is not None:
             if args.stratified_rerank_pool and args.retriever == "hybrid":
-                retrieved = _build_stratified_rerank_pool(
+                retrieved = build_stratified_rerank_pool(
                     hybrid_doc_ids=retrieved,
                     semantic_doc_ids=semantic_branch_doc_ids,
                     bm25_doc_ids=bm25_branch_doc_ids,
                     limit=retrieve_k,
                 )
             if args.soft_recall_rescue and args.retriever == "hybrid":
-                retrieved = _inject_bm25_tail_candidates(
+                retrieved = inject_bm25_tail_candidates(
                     query=sample.query,
                     merged_doc_ids=retrieved,
                     retriever=retriever,
@@ -830,7 +297,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 diversity_threshold = (
                     args.mmr_diversity_threshold if args.mmr_diversity_threshold > 0 else None
                 )
-                retrieved = _mmr_select_candidates(
+                retrieved = mmr_select_candidates(
                     candidate_doc_ids=retrieved,
                     query_embedding=query_embedding_for_mmr,
                     doc_embeddings=semantic_embedding_map,
@@ -864,7 +331,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                     >= args.hard_negative_semantic_floor
                 ]
             if args.two_stage_rerank:
-                rerank_input = _prefilter_rerank_candidates(
+                rerank_input = prefilter_rerank_candidates(
                     sample.query,
                     rerank_input,
                     keep_top_n=args.prefilter_candidates,
@@ -899,13 +366,13 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         if sample.relevant_docs and not set(retrieved_for_metrics).intersection(
             sample.relevant_docs
         ):
-            miss_type = _source_miss_type(
+            miss_type = source_miss_type(
                 relevant_doc_ids=sample.relevant_docs,
                 semantic_doc_ids=semantic_branch_doc_ids,
                 bm25_doc_ids=bm25_branch_doc_ids,
             )
             miss_type_counts[miss_type] += 1
-            bucket, reasons = _classify_failure(
+            failure = classify_failure(
                 query=sample.query,
                 gt_doc_ids=sample.relevant_docs,
                 top_k_doc_ids=retrieved_for_metrics,
@@ -914,6 +381,8 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 near_miss_threshold=args.failure_near_miss_threshold,
                 top_k=max_k,
             )
+            bucket = failure.bucket
+            reasons = failure.reasons
             if bucket not in failure_bucket_source_counts:
                 failure_bucket_source_counts[bucket] = Counter()
             failure_bucket_source_counts[bucket][miss_type] += 1
@@ -1023,7 +492,7 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
         out_jsonl = Path(
             args.export_reranker_train_jsonl or "artifacts/datasets/reranker_train.jsonl"
         )
-        contexts, pair_stats = _build_reranker_training_contexts_from_failures(
+        context_build_result = build_reranker_training_contexts_from_failures(
             failure_records=failure_records,
             doc_text_map=doc_text_map,
             max_negative_rank=max(1, args.reranker_train_max_negative_rank),
@@ -1032,20 +501,22 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
             true_recall_weight=max(0.1, args.reranker_train_weight_true_recall),
             default_weight=max(0.1, args.reranker_train_weight_default),
         )
+        contexts = context_build_result.contexts
+        pair_stats = context_build_result.stats
         out_jsonl.parent.mkdir(parents=True, exist_ok=True)
         with out_jsonl.open("w", encoding="utf-8") as fp:
             for row in contexts:
-                fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fp.write(json.dumps(row.model_dump(), ensure_ascii=False) + "\n")
         reranker_dataset_export = {
             "path": str(out_jsonl),
             "contexts": len(contexts),
-            "stats": pair_stats,
+            "stats": pair_stats.model_dump(),
             "schema_version": "reranker_context_v1",
         }
         report["reranker_dataset_export"] = reranker_dataset_export
         print(f"- reranker_dataset_export: {out_jsonl} ({len(contexts)} contexts)")
         if args.train_reranker:
-            reranker_training_result = _train_reranker_from_contexts_jsonl(
+            reranker_training_result = train_reranker_from_contexts_jsonl(
                 train_jsonl=out_jsonl,
                 doc_text_map=doc_text_map,
                 model_name=args.train_reranker_model,
@@ -1056,8 +527,8 @@ def cmd_evaluation_runner(args: argparse.Namespace) -> None:
                 val_ratio=args.train_reranker_val_ratio,
                 seed=args.train_reranker_seed,
             )
-            report["reranker_training"] = reranker_training_result
-            print(f"- reranker_training_out: {reranker_training_result['out_dir']}")
+            report["reranker_training"] = reranker_training_result.model_dump()
+            print(f"- reranker_training_out: {reranker_training_result.out_dir}")
 
     print("Retrieval benchmark report")
     print(f"- dataset: {args.dataset}")
