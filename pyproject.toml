@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "RAG data parsing pipeline for scraping, chunking, and JSONL export."
 authors = ["astarovo <astarovo@example.com>"]
 readme = "README.md"
-packages = [{ include = "parser" }, { include = "embeddings" }, { include = "retrieval" }, { include = "generation" }, { include = "utils" }, { include = "caching" }]
+packages = [{ include = "parser" }, { include = "embeddings" }, { include = "retrieval" }, { include = "generation" }, { include = "utils" }, { include = "caching" }, { include = "api" }]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
@@ -17,10 +17,13 @@ datasets = "^4.8.4"
 accelerate = "^1.13.0"
 pydantic = "*"
 tqdm = "*"
+fastapi = "*"
+uvicorn = "*"
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
 ruff = "*"
+httpx = "*"
 
 [tool.poetry.scripts]
 rag-parser = "parser.main:main"

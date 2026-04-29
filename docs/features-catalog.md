@@ -77,20 +77,30 @@ This document lists core project features by category with short practical descr
 
 ## Evaluation Dataset and Metrics
 
-- Evaluation dataset build from base eval file + RAG chunks.
-- Matching / evidence-resolution settings:
-  - `--fuzzy-ratio`
-  - `--lexical-min-hits`
-  - `--max-chunk-ids`
-  - `--max-gt-url-share`
-  - `--target-multi-gt-share`
-  - `--keep-max-ids-for-multi`
-- Retrieval metrics support includes:
-  - hit rate at K
-  - recall/precision at K
-  - MRR
-  - nDCG at K
-- JSON report export via `--out-json`.
+- Dataset evaluation runs in two stages:
+  - Ground-truth evidence construction (`build_evaluation_dataset`) from base eval blocks plus `rag_dataset` chunks.
+  - Retrieval benchmark scoring (`evaluation_runner`) that compares ranked retrieved ids against expected evidence ids.
+- Ground-truth resolution criteria (in order):
+  - exact question match against QA map
+  - fuzzy question match (`--fuzzy-ratio`)
+  - optional semantic fallback (`--semantic-min-score`)
+  - lexical fallback with keyword/phrase overlap (`--lexical-min-hits`, `--max-chunk-ids`)
+- Ground-truth balancing criteria:
+  - per-source evidence concentration cap (`--max-gt-url-share`)
+  - multi-ground-truth share cap (`--target-multi-gt-share`, `--keep-max-ids-for-multi`)
+- Filtering criterion at scoring time:
+  - optional `--require-evidence` to score only samples with non-empty `expected_evidence.chunk_ids`
+- Retrieval quality formulas (project metrics implementation):
+## recall@k = |top_k(retrieved_doc_ids) intersection relevant_doc_ids| / |relevant_doc_ids|
+## precision@k = relevant_hits_in_top_k / |top_k(retrieved_doc_ids)|
+## hit_rate@k = 1.0 if any relevant doc appears in top_k, else 0.0
+## reciprocal_rank = 1 / rank(first_relevant_doc), else 0.0 if no relevant doc retrieved
+## mrr = mean(reciprocal_rank over all queries)
+## dcg@k = sum over rank i in top_k of ((2^rel_i - 1) / log2(i + 1))
+## ndcg@k = dcg@k / idcg@k
+- Aggregation rule:
+  - each metric is computed per query and then averaged across the evaluated sample set.
+- JSON report export via `--out-json` includes metrics, sample counts, filtering stats, and per-query runs.
 
 ## RAG Generation Features
 

@@ -16,7 +16,6 @@ from reranking.failure_driven import (
 )
 
 
-@dataclass
 class TestFailureDrivenHelpers(unittest.TestCase):
     def test_rrf_fuse_doc_ids_merges_ranks(self) -> None:
         fused = rrf_fuse_doc_ids([["a", "b"], ["b", "c"]], top_k=3, rrf_k=1)
@@ -119,6 +118,7 @@ class TestFailureDrivenHelpers(unittest.TestCase):
         self.assertEqual(stats.contexts_written, 1)
 
 
+@dataclass
 class _Candidate:
     doc_id: str
     text: str

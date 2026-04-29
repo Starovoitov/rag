@@ -427,6 +427,24 @@ Available commands:
 - `run_rag` - run full RAG query against selected LLM provider
 - `cleanup_faiss` - remove FAISS index (optionally remove full FAISS directory)
 
+## FastAPI server
+
+Run the REST server that exposes primary commands (`build_parser`, `build_faiss`, `demo_retrieval`,
+`evaluation_runner`, `reranker_pipeline`, `run_rag`, `cleanup_faiss`):
+
+```bash
+poetry run uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Open Swagger UI:
+- [http://localhost:8000/docs](http://localhost:8000/docs)
+
+Open OpenAPI JSON:
+- [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json)
+
+Each command has a dedicated `POST /<command>` endpoint and includes its CLI flags in the request
+schema.
+
 Caching support:
 - `caching/lru_ttl_cache.py` provides in-memory LRU + TTL cache primitives
 - retrieval cache available in `evaluation_runner` / `reranker_pipeline`
